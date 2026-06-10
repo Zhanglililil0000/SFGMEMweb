@@ -38,6 +38,14 @@ call "%PYTHON%" -m pip install -r "%~dp0backend\requirements.txt" --quiet
 echo Starting backend...
 start "MEM Backend" cmd /k "cd /d "%~dp0backend" && "%PYTHON%" main.py"
 timeout /t 2 >nul
+
+if not exist "%~dp0frontend\node_modules" (
+    echo Installing frontend dependencies...
+    cd /d "%~dp0frontend"
+    call npm install
+    cd /d "%~dp0"
+)
+
 echo Starting frontend...
 start "MEM Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
 timeout /t 3 >nul
