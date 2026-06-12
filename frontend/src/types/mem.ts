@@ -65,6 +65,8 @@ export interface FittingParams {
 
 export interface MemCompareResult {
   wavenumbers: number[]
+  import_intensity: number[]
+  fitting_intensity: number[]
   mem_real: number[]
   mem_imag: number[]
   fitting_real: number[]

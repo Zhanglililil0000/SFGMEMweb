@@ -4,7 +4,7 @@ import {
   Row, Col, Card, InputNumber, Button, Typography, message, Space,
   Alert, Upload, Select, Slider, Empty,
 } from 'antd'
-import { InboxOutlined, PlayCircleOutlined, UploadOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons'
+import { DownloadOutlined, InboxOutlined, PlayCircleOutlined, UploadOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons'
 import * as api from '../api/mem'
 import type { ColumnInfo, SfgPeakParams, FittingParams, MemCompareResult } from '../types/mem'
 
@@ -82,7 +82,7 @@ export default function MemVsFittingPage() {
 
   const comparisonRef = useRef<HTMLDivElement>(null)
   const diffRef = useRef<HTMLDivElement>(null)
-  const diffImagRef = useRef<HTMLDivElement>(null)
+  const intensityRef = useRef<HTMLDivElement>(null)
 
   const phaseValues = useMemo(() => {
     const arr: number[] = []
@@ -151,38 +151,70 @@ export default function MemVsFittingPage() {
   }, [result, currentRotated])
 
   useEffect(() => {
-    if (!result || !phaseDiffData) return
-    const pv = phaseValues
+    if (!result || !intensityRef.current) return
+    const w = safeArr(result.wavenumbers)
+    Plotly.newPlot(intensityRef.current, [
+      {
+        x: w, y: safeArr(result.import_intensity),
+        type: 'scatter', mode: 'lines',
+        name: 'Import Spectra',
+        line: { color: '#1677ff', width: 1.8 },
+      },
+      {
+        x: w, y: safeArr(result.fitting_intensity),
+        type: 'scatter', mode: 'lines',
+        name: 'Fitting Generated Spectra',
+        line: { color: '#f39c12', width: 1.8, dash: 'dash' },
+      },
+    ], {
+      title: { text: 'Intensity Comparison: Import vs Fitting', font: { size: 14 } },
+      xaxis: { title: 'Wavenumber (cm<sup>-1</sup>)' },
+      yaxis: { title: '|chi|^2' },
+      hovermode: 'x',
+      margin: { l: 60, r: 20, t: 50, b: 45 },
+      legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
+    }, chartConfig)
+  }, [result])
 
-    function drawDiff(el: HTMLDivElement | null, yData: number[], title: string, color: string) {
-      if (!el) return
-      const traces: any[] = [
-        { x: pv, y: yData, type: 'scatter', mode: 'lines', name: title, line: { color, width: 2 } },
-      ]
-      if (phaseAngle > 0) {
-        const idx = Math.round((phaseAngle / (2 * Math.PI)) * PHASE_SAMPLES)
-        if (idx >= 0 && idx < pv.length) {
-          traces.push({
-            x: [phaseAngle, phaseAngle],
-            y: [0, Math.max(...yData) * 1.1],
-            type: 'scatter', mode: 'lines',
-            name: 'current', line: { color: '#999', width: 1, dash: 'dash' },
-            showlegend: false,
-          })
+  useEffect(() => {
+    if (!result || !phaseDiffData || !diffRef.current) return
+    const gd = diffRef.current
+    const pv = phaseValues
+    const allY = phaseDiffData.diffReal.concat(phaseDiffData.diffImag)
+    const yMax = Math.max(...allY) * 1.1
+    const traces: any[] = [
+      { x: pv, y: phaseDiffData.diffReal, type: 'scatter', mode: 'lines', name: 'Real Part Diff', line: { color: '#e74c3c', width: 2 } },
+      { x: pv, y: phaseDiffData.diffImag, type: 'scatter', mode: 'lines', name: 'Imaginary Part Diff', line: { color: '#3498db', width: 2 } },
+    ]
+    if (phaseAngle > 0) {
+      traces.push({
+        x: [phaseAngle, phaseAngle],
+        y: [0, yMax],
+        type: 'scatter', mode: 'lines',
+        name: 'current', line: { color: '#999', width: 1, dash: 'dash' },
+        showlegend: false,
+      })
+    }
+    Plotly.newPlot(gd, traces, {
+      title: { text: 'Error Phase Difference — click to set phase', font: { size: 14 } },
+      xaxis: { title: 'Error phase (rad)', range: [0, 2 * Math.PI] },
+      yaxis: { title: 'Sum |diff|' },
+      hovermode: 'x',
+      margin: { l: 60, r: 20, t: 50, b: 45 },
+      legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
+    }, chartConfig)
+    const onClick = (eventData: any) => {
+      if (eventData?.points?.[0]) {
+        const x = eventData.points[0].x as number
+        if (x >= 0 && x <= 2 * Math.PI) {
+          setPhaseAngle(Math.round(x * 100) / 100)
         }
       }
-      Plotly.newPlot(el, traces, {
-        title: { text: title, font: { size: 12 } },
-        xaxis: { title: 'Error phase (rad)', range: [0, 2 * Math.PI] },
-        yaxis: { title: 'Sum |diff|' },
-        hovermode: 'x',
-        margin: { l: 50, r: 10, t: 35, b: 35 },
-        showlegend: false,
-      }, chartConfig)
     }
-
-    drawDiff(diffRef.current, phaseDiffData.diffReal, 'Real Part Difference', '#e74c3c')
-    drawDiff(diffImagRef.current, phaseDiffData.diffImag, 'Imaginary Part Difference', '#3498db')
+    gd.on('plotly_click', onClick)
+    return () => {
+      gd.removeAllListeners?.('plotly_click')
+    }
   }, [phaseDiffData, phaseAngle, phaseValues])
 
   const handleFileUpload = (f: File) => {
@@ -236,10 +268,25 @@ export default function MemVsFittingPage() {
       setPhaseAngle(0)
       if (comparisonRef.current) Plotly.purge(comparisonRef.current)
       if (diffRef.current) Plotly.purge(diffRef.current)
-      if (diffImagRef.current) Plotly.purge(diffImagRef.current)
+      if (intensityRef.current) Plotly.purge(intensityRef.current)
     } catch (e: any) {
       setError(e?.response?.data?.detail || e.message || 'Error')
     } finally { setTimeout(() => setLoading(false), 100) }
+  }
+
+  const handleExportDiff = () => {
+    if (!phaseDiffData) return
+    const lines = ['ErrorPhase,RealDiff,ImagDiff']
+    for (let i = 0; i < phaseValues.length; i++) {
+      lines.push(`${phaseValues[i].toFixed(6)},${phaseDiffData.diffReal[i].toExponential(6)},${phaseDiffData.diffImag[i].toExponential(6)}`)
+    }
+    const csv = lines.join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = 'MEM_vs_Fitting_Diff.csv'
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    message.success('Difference data exported')
   }
 
   const hasFile = file !== null
@@ -335,6 +382,10 @@ export default function MemVsFittingPage() {
       {hasResult && result && (
         <>
           <Card size="small" style={{ marginTop: 12 }}>
+            <div ref={intensityRef} style={{ width: '100%', minHeight: 350 }} />
+          </Card>
+
+          <Card size="small" style={{ marginTop: 12 }}>
             <div ref={comparisonRef} style={{ width: '100%', minHeight: 400 }} />
           </Card>
 
@@ -357,18 +408,10 @@ export default function MemVsFittingPage() {
             </Row>
           </Card>
 
-          <Row gutter={12} style={{ marginTop: 12 }}>
-            <Col xs={24} lg={12}>
-              <Card size="small" style={{ background: '#fff' }}>
-                <div ref={diffRef} style={{ width: '100%', minHeight: 300 }} />
-              </Card>
-            </Col>
-            <Col xs={24} lg={12}>
-              <Card size="small" style={{ background: '#fff' }}>
-                <div ref={diffImagRef} style={{ width: '100%', minHeight: 300 }} />
-              </Card>
-            </Col>
-          </Row>
+          <Card size="small" title="Error Phase Difference" style={{ marginTop: 12 }}
+            extra={<Button size="small" icon={<DownloadOutlined />} onClick={handleExportDiff} disabled={!phaseDiffData}>Export CSV</Button>}>
+            <div ref={diffRef} style={{ width: '100%', minHeight: 350 }} />
+          </Card>
         </>
       )}
     </div>

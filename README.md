@@ -53,8 +53,18 @@ MEMweb/
 
 ### 环境要求
 
-- **Python 3.10+**，conda 环境路径为 `D:\Anaconda\envs\py310`
+- **Python 3.10+**（推荐 conda 环境，`run.bat` 默认指向 `D:\Anaconda\envs\py310`）
 - **Node.js 20+**（含 npm）
+
+> **新电脑部署注意**：若提示 `npm: command not found`，说明未安装 Node.js。
+> 前往 [https://nodejs.org](https://nodejs.org) 下载 LTS 版本安装，安装完成后**重新打开命令行窗口**，
+> 执行 `npm install`（仅首次）再 `npm run dev`。
+
+### 首次运行
+
+```bash
+cd frontend && npm install            # 仅首次，安装前端依赖
+```
 
 ### 启动
 
@@ -267,3 +277,10 @@ SFG Generator 导出包含总谱与各子峰分量。
 
 强度 = |χ(ω)|²，实部 = Re[χ]，虚部 = Im[χ]。
 
+## 关联项目
+
+| 项目 | 说明 |
+|------|------|
+| `../MEMPy/` | 原版 Tkinter 桌面 GUI（MEM 算法参考实现） |
+| `../SFG generator/` | 原版 Tkinter SFG 生成器（UI 参考） |
+| `../TestData/` | 标准测试数据集 |

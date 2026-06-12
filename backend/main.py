@@ -189,12 +189,14 @@ async def mem_compare(
         chiT = chiT * rat
 
     try:
-        _, fit_real, fit_imag, _, _ = compute_sfg_spectrum(wavenumbers, fitting_raw_params, phases=fit_phases)
+        fit_intensity, fit_real, fit_imag, _, _ = compute_sfg_spectrum(wavenumbers, fitting_raw_params, phases=fit_phases)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fitting spectrum calculation failed: {str(e)}")
 
     return {
         "wavenumbers": wavenumbers.tolist(),
+        "import_intensity": intensity.tolist(),
+        "fitting_intensity": fit_intensity.tolist(),
         "mem_real": np.real(chiT).tolist(),
         "mem_imag": np.imag(chiT).tolist(),
         "fitting_real": fit_real.tolist(),
