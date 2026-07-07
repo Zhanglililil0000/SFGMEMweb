@@ -100,7 +100,7 @@ cd backend && python main.py           # 访问 :8000
 
 ### 标签 2：SFG Generator
 
-根据 Lorentzian 参数生成 SFG 光谱。
+根据 Lorentzian 或 Voigt 参数生成复 SFG 光谱。
 
 ```
 χ(ω) = A_NR + Σ A_q · e^(i·φ_q) / (ω_q − ω − i·Γ_q)
@@ -108,8 +108,8 @@ cd backend && python main.py           # 访问 :8000
 
 | 功能 | 说明 |
 |------|------|
-| 参数面板 | 波数范围、NR 实部/虚部、动态峰参数（振幅/中心/宽度/相位） |
-| 文件导入 | 支持 `.txt` / `.csv` 文件批量导入 `A{n}/Omega{n}/Gamma{n}/Phi{n}` 参数 |
+| 参数面板 | 波数范围、NR 实部/虚部、动态峰参数（线形/振幅/中心/Lorentzian HWHM/Gaussian FWHM/相位） |
+| 文件导入 | 支持 `.txt` / `.csv` 文件批量导入 `A{n}/Omega{n}/Gamma{n}/Phi{n}` 参数；缺少线形字段时默认 Lorentzian |
 | 三图显示 | 强度、实部、虚部 — 各自上下排列 |
 | 子峰叠加 | 开关控制是否用虚线显示各峰分量 |
 | CSV 导出 | 含总谱与各子峰分量；参数导出会注明当前 Phase unit |
@@ -119,16 +119,38 @@ cd backend && python main.py           # 访问 :8000
 ```
 NR_Real=1
 NR_Imag=0
+Profile1=lorentzian
 A1=1
 Omega1=2990
 Gamma1=3
+Gaussian_FWHM1=0
 Phi1=90
+Profile2=voigt
 A2=2
 Omega2=2950
 Gamma2=4
+Gaussian_FWHM2=12
 ```
 
-`Phi` 行可选，缺失时默认为 0。以 `#` 开头的行为注释。
+`Profile`、`Gaussian_FWHM` 和 `Phi` 行可选，缺失时分别默认为 `lorentzian`、`0` 和 `0`。以 `#` 开头的行为注释。旧格式文件只含 `A{n}/Omega{n}/Gamma{n}/Phi{n}` 时仍按 Lorentzian 导入。
+
+### Lorentzian and Voigt peak profiles / 峰线形
+
+当前程序保留原有 Lorentzian 复响应约定：
+
+```
+χ_q(ω) = A_q exp(iφ_q) / (ω_q − ω − iΓ_q)
+```
+
+其中 `Gamma` / `width` / `Γ_q` 按旧程序定义为 Lorentzian HWHM（半高半宽），不是 FWHM。为了不改变旧参数文件的含义，`Gamma1=3` 仍表示 `Γ=3 cm^-1`。对应 Lorentzian FWHM 为 `2Γ`。
+
+Voigt 峰使用 `scipy.special.wofz` 计算 complex Voigt profile，即 Gaussian 非均匀展宽作用在复 Lorentzian 响应上。Gaussian 宽度在 GUI 和参数文件中使用 FWHM，内部转换为 `σ = FWHM / (2 sqrt(2 ln 2))`。程序不会对最终强度 `|χ|^2` 做卷积；总强度始终由总复响应计算：
+
+```
+Intensity(ω) = |χ_NR + Σχ_q(ω)|^2
+```
+
+当 `Profile=voigt` 且 `Gaussian_FWHM=0` 时，Voigt 会退化为原来的 Lorentzian 结果。
 
 ### Phase unit for Phi import/export / Phi 相位单位
 
@@ -353,7 +375,7 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_ideal in select
 | `npoints` | int | 数据点数（10 ~ 10000） |
 | `nr_real` | float | NR 实部 |
 | `nr_imag` | float | NR 虚部 |
-| `peaks` | list | 峰参数，每项含 `amplitude`, `center`, `width`, `phase` |
+| `peaks` | list | 峰参数，每项含 `profile_type`, `amplitude`, `center`, `width`, `gaussian_fwhm`, `phase`；`width` 为 Lorentzian HWHM |
 
 响应：
 
@@ -375,7 +397,7 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_ideal in select
 | `nn` | int | MEM NN（可选） |
 | `mem_points` | int | MEM 计算点数 `N_MEM`（可选，默认 `N_original`） |
 | `column` | int | 强度列索引（可选） |
-| `params_json` | string | JSON 格式的拟合参数（同 SFG Generator 格式） |
+| `params_json` | string | JSON 格式的拟合参数（同 SFG Generator 格式，支持 Lorentzian/Voigt peak） |
 
 响应：
 
@@ -461,7 +483,7 @@ SFG Generator 导出包含总谱与各子峰分量。SFG Generator 和 MEM vs Fi
 
 ## SFG 光谱公式
 
-χ(ω) 由非共振项与多个 Lorentzian 峰叠加：
+χ(ω) 由非共振项与多个 Lorentzian 或 Voigt 峰叠加。Lorentzian 峰使用：
 
 ```
 χ(ω) = NR_Real + i·NR_Imag + Σ_q A_q · e^(i·φ_q) / (ω_q − ω − i·Γ_q)
@@ -472,10 +494,11 @@ SFG Generator 导出包含总谱与各子峰分量。SFG Generator 和 MEM vs Fi
 | `NR_Real`, `NR_Imag` | 非共振复振幅 |
 | `A_q` | 第 q 峰的振幅 |
 | `ω_q` | 第 q 峰的中心波数 |
-| `Γ_q` | 第 q 峰的宽度（半高半宽） |
+| `Γ_q` | 第 q 峰的 Lorentzian HWHM（半高半宽）；Lorentzian FWHM = `2Γ_q` |
+| `Gaussian_FWHM_q` | Voigt 峰的 Gaussian FWHM；Lorentzian 峰忽略该值 |
 | `φ_q` | 第 q 峰的相位（后端内部使用 rad；GUI 中 `Phi` 可由 `Phase unit` 选择 degrees 或 radians，默认 degrees） |
 
-强度 = |χ(ω)|²，实部 = Re[χ]，虚部 = Im[χ]。
+Voigt 峰通过 Faddeeva function 计算 complex Voigt profile。强度 = |χ(ω)|²，实部 = Re[χ]，虚部 = Im[χ]。
 
 ## 关联项目
 

@@ -50,6 +50,26 @@ class SfgGenerateRequest(BaseModel):
     peaks: List[dict] = []
 
 
+def collect_sfg_peak_parameters(peaks: List[dict]):
+    raw_params = []
+    phases = []
+    peak_options = []
+    for peak in peaks:
+        profile_type = str(peak.get("profile_type", "lorentzian")).lower()
+        gaussian_fwhm = float(peak.get("gaussian_fwhm", 0.0))
+        raw_params.extend([
+            float(peak.get("amplitude", 1.0)),
+            float(peak.get("center", 3000.0)),
+            float(peak.get("width", 10.0)),
+        ])
+        phases.append(float(peak.get("phase", 0.0)))
+        peak_options.append({
+            "profile_type": profile_type,
+            "gaussian_fwhm": gaussian_fwhm,
+        })
+    return raw_params, phases, peak_options
+
+
 def parse_mem_points(value: Optional[str], default_value: int) -> int:
     if value is None:
         parsed = default_value
@@ -180,15 +200,8 @@ async def mem_compare(
     except (json.JSONDecodeError, ValueError, TypeError) as e:
         raise HTTPException(status_code=422, detail=f"Invalid params_json: {str(e)}")
 
-    fitting_raw_params = [nr_real, nr_imag]
-    fit_phases = []
-    for peak in peaks:
-        fitting_raw_params.extend([
-            float(peak.get("amplitude", 1.0)),
-            float(peak.get("center", 3000.0)),
-            float(peak.get("width", 10.0)),
-        ])
-        fit_phases.append(float(peak.get("phase", 0.0)))
+    peak_params, fit_phases, peak_options = collect_sfg_peak_parameters(peaks)
+    fitting_raw_params = [nr_real, nr_imag, *peak_params]
 
     content = await file.read()
 
@@ -239,7 +252,12 @@ async def mem_compare(
         chiT = chiT * rat
 
     try:
-        fit_intensity, fit_real, fit_imag, _, _ = compute_sfg_spectrum(mem_wavenumbers, fitting_raw_params, phases=fit_phases)
+        fit_intensity, fit_real, fit_imag, _, _ = compute_sfg_spectrum(
+            mem_wavenumbers,
+            fitting_raw_params,
+            phases=fit_phases,
+            peak_options=peak_options,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fitting spectrum calculation failed: {str(e)}")
 
@@ -271,16 +289,18 @@ async def sfg_generate(request: SfgGenerateRequest):
     if request.npoints < 10 or request.npoints > 10000:
         raise HTTPException(status_code=422, detail="npoints must be between 10 and 10000")
 
-    params = [request.nr_real, request.nr_imag]
-    sfg_phases = []
-    for peak in request.peaks:
-        params.extend([peak.get("amplitude", 1.0), peak.get("center", 3000.0), peak.get("width", 10.0)])
-        sfg_phases.append(peak.get("phase", 0.0))
+    peak_params, sfg_phases, peak_options = collect_sfg_peak_parameters(request.peaks)
+    params = [request.nr_real, request.nr_imag, *peak_params]
 
     wavenumbers = np.linspace(request.xmin, request.xmax, request.npoints)
 
     try:
-        intensity, real_part, imag_part, _, sub_components = compute_sfg_spectrum(wavenumbers, params, phases=sfg_phases)
+        intensity, real_part, imag_part, _, sub_components = compute_sfg_spectrum(
+            wavenumbers,
+            params,
+            phases=sfg_phases,
+            peak_options=peak_options,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SFG calculation failed: {str(e)}")
 

@@ -7,7 +7,6 @@ import type { SfgPeakParams, SfgResult } from '../types/mem'
 import {
   formatParameterNumber,
   formatPhaseForUnit,
-  parseParameterValues,
   phaseFromDisplay,
   phaseInputStep,
   phaseToDisplay,
@@ -15,7 +14,9 @@ import {
   phaseUnitOptions,
   phaseUnitSymbol,
   type PhaseUnit,
+  parseParameterFields,
 } from '../utils/phaseUnit'
+import { buildImportedPeak, importedPeakIndices, normalizeProfileType, profileTypeOptions } from '../utils/sfgPeakParams'
 
 const Plotly = (window as any).Plotly
 const { Text } = Typography
@@ -28,7 +29,7 @@ const chartConfig = {
 }
 
 function emptyPeak(): SfgPeakParams {
-  return { amplitude: 1.0, center: 3200, width: 10, phase: 0 }
+  return { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_fwhm: 0 }
 }
 
 export default function SfgGeneratorPage() {
@@ -38,8 +39,8 @@ export default function SfgGeneratorPage() {
   const [nrReal, setNrReal] = useState(0.0)
   const [nrImag, setNrImag] = useState(0.0)
   const [peaks, setPeaks] = useState<SfgPeakParams[]>([
-    { amplitude: 1.0, center: 3200, width: 10, phase: 0 },
-    { amplitude: 0.8, center: 3400, width: 15, phase: 0 },
+    { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_fwhm: 0 },
+    { amplitude: 0.8, center: 3400, width: 15, phase: 0, profile_type: 'lorentzian', gaussian_fwhm: 0 },
   ])
   const [phaseUnit, setPhaseUnit] = useState<PhaseUnit>('degrees')
   const [showSubpeaks, setShowSubpeaks] = useState(false)
@@ -148,25 +149,24 @@ export default function SfgGeneratorPage() {
     const reader = new FileReader()
     reader.onload = (e) => {
       const text = e.target?.result as string
-      const kv = parseParameterValues(text)
+      const fields = parseParameterFields(text)
+      const kv = Object.fromEntries(
+        Object.entries(fields)
+          .map(([key, value]) => [key, Number(value)] as const)
+          .filter(([, value]) => Number.isFinite(value)),
+      )
 
       if (kv.NR_Real !== undefined) setNrReal(kv.NR_Real)
       if (kv.NR_Imag !== undefined) setNrImag(kv.NR_Imag)
 
-      const peakIndices: number[] = []
-      for (const key of Object.keys(kv)) {
-        const m = key.match(/^A(\d+)$/)
-        if (m) peakIndices.push(parseInt(m[1]))
-      }
-      peakIndices.sort((a, b) => a - b)
+      const peakIndices = importedPeakIndices(fields)
 
       if (peakIndices.length > 0) {
-        const importedPeaks: SfgPeakParams[] = peakIndices.map((n) => ({
-          amplitude: kv[`A${n}`] ?? 1.0,
-          center: kv[`Omega${n}`] ?? 3000 + n * 50,
-          width: kv[`Gamma${n}`] ?? 10,
-          phase: phaseFromDisplay(kv[`Phi${n}`] ?? 0, phaseUnit),
-        }))
+        const importedPeaks: SfgPeakParams[] = peakIndices.map((n) => buildImportedPeak(fields, n, phaseUnit, 3000 + n * 50))
+        setPeaks(importedPeaks)
+        message.success(`Imported ${importedPeaks.length} peak(s); Phi interpreted as ${phaseUnitName(phaseUnit)}`)
+      } else if (fields.Amplitude != null || fields.amplitude != null || fields.profile_type != null) {
+        const importedPeaks = [buildImportedPeak(fields, null, phaseUnit, 3200)]
         setPeaks(importedPeaks)
         message.success(`Imported ${importedPeaks.length} peak(s); Phi interpreted as ${phaseUnitName(phaseUnit)}`)
       } else {
@@ -187,9 +187,13 @@ export default function SfgGeneratorPage() {
     peaks.forEach((peak, index) => {
       const n = index + 1
       lines.push(
+        `Profile${n}=${peak.profile_type ?? 'lorentzian'}`,
         `A${n}=${formatParameterNumber(peak.amplitude)}`,
         `Omega${n}=${formatParameterNumber(peak.center)}`,
         `Gamma${n}=${formatParameterNumber(peak.width)}`,
+        `Lorentzian_HWHM${n}=${formatParameterNumber(peak.width)}`,
+        `Lorentzian_FWHM${n}=${formatParameterNumber(2 * peak.width)}`,
+        `Gaussian_FWHM${n}=${formatParameterNumber(peak.gaussian_fwhm ?? 0)}`,
         `Phi${n}=${formatPhaseForUnit(peak.phase, phaseUnit)}`,
       )
     })
@@ -239,14 +243,34 @@ export default function SfgGeneratorPage() {
           <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
             Phi display, manual input, parameter import and parameter export use this unit; backend calculation uses radians.
           </Text>
+          <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+            Lorentzian width uses the original Gamma convention: HWHM. Gaussian broadening uses FWHM and only applies to Voigt peaks.
+          </Text>
           {peaks.map((p, i) => (
             <Card key={i} size="small" style={{ marginTop: 8 }} title={<Text style={{ fontSize: 13 }}>Peak {i + 1}</Text>} extra={
               <Button size="small" danger icon={<DeleteOutlined />} onClick={() => removePeak(i)} />
             }>
               <Space direction="vertical" size={4}>
+                <Select
+                  value={p.profile_type ?? 'lorentzian'}
+                  onChange={(value) => setPeaks(peaks.map((peak, idx) => (
+                    idx === i ? { ...peak, profile_type: normalizeProfileType(value) } : peak
+                  )))}
+                  options={profileTypeOptions}
+                  style={{ width: 180 }}
+                />
                 <InputNumber addonBefore="Amplitude" value={p.amplitude} onChange={(v) => updatePeak(i, 'amplitude', v)} step={0.1} style={{ width: 180 }} />
                 <InputNumber addonBefore="Center" value={p.center} onChange={(v) => updatePeak(i, 'center', v)} step={1} style={{ width: 180 }} />
-                <InputNumber addonBefore="Width" value={p.width} onChange={(v) => updatePeak(i, 'width', v)} step={0.5} min={0.1} style={{ width: 180 }} />
+                <InputNumber addonBefore="Lorentzian HWHM" value={p.width} onChange={(v) => updatePeak(i, 'width', v)} step={0.5} min={0.1} style={{ width: 180 }} />
+                <InputNumber
+                  addonBefore="Gaussian FWHM"
+                  value={p.gaussian_fwhm ?? 0}
+                  onChange={(v) => updatePeak(i, 'gaussian_fwhm', v)}
+                  step={0.5}
+                  min={0}
+                  disabled={(p.profile_type ?? 'lorentzian') === 'lorentzian'}
+                  style={{ width: 180 }}
+                />
                 <InputNumber
                   addonBefore={`Phase (${phaseUnitSymbol(phaseUnit)})`}
                   value={phaseToDisplay(p.phase, phaseUnit)}

@@ -54,8 +54,8 @@ function parseNumber(value: string | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export function parseParameterValues(text: string): Record<string, number> {
-  const kv: Record<string, number> = {}
+export function parseParameterFields(text: string): Record<string, string> {
+  const kv: Record<string, string> = {}
   const lines = text.split(/\r?\n/)
 
   for (const line of lines) {
@@ -64,8 +64,8 @@ export function parseParameterValues(text: string): Record<string, number> {
     const eq = trimmed.indexOf('=')
     if (eq === -1) continue
     const key = trimmed.slice(0, eq).trim()
-    const val = parseNumber(trimmed.slice(eq + 1))
-    if (val != null) kv[key] = val
+    const val = trimmed.slice(eq + 1).trim()
+    if (val !== '') kv[key] = val
   }
 
   const csvRows = lines
@@ -75,9 +75,8 @@ export function parseParameterValues(text: string): Record<string, number> {
     .filter((row) => row.length >= 2)
 
   for (const row of csvRows) {
-    const val = parseNumber(row[1])
-    if (row[0] && val != null && Number.isNaN(Number(row[0]))) {
-      kv[row[0]] = val
+    if (row[0] && row[1] && Number.isNaN(Number(row[0]))) {
+      kv[row[0]] = row[1]
     }
   }
 
@@ -86,11 +85,20 @@ export function parseParameterValues(text: string): Record<string, number> {
     const values = csvRows[1]
     if (header.some((cell) => Number.isNaN(Number(cell)))) {
       for (let i = 0; i < header.length; i++) {
-        const val = parseNumber(values[i])
-        if (header[i] && val != null) kv[header[i]] = val
+        if (header[i] && values[i]) kv[header[i]] = values[i]
       }
     }
   }
 
   return kv
+}
+
+export function parseParameterValues(text: string): Record<string, number> {
+  const fields = parseParameterFields(text)
+  const values: Record<string, number> = {}
+  for (const [key, value] of Object.entries(fields)) {
+    const parsed = parseNumber(value)
+    if (parsed != null) values[key] = parsed
+  }
+  return values
 }

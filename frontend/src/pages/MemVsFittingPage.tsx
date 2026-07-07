@@ -11,7 +11,7 @@ import {
   degToRad,
   formatParameterNumber,
   formatPhaseForUnit,
-  parseParameterValues,
+  parseParameterFields,
   phaseFromDisplay,
   phaseInputStep,
   radToDeg,
@@ -21,6 +21,7 @@ import {
   phaseUnitSymbol,
   type PhaseUnit,
 } from '../utils/phaseUnit'
+import { buildImportedPeak, importedPeakIndices, normalizeProfileType, profileTypeOptions } from '../utils/sfgPeakParams'
 
 const Plotly = (window as any).Plotly
 const { Text } = Typography
@@ -40,7 +41,7 @@ const chartConfig = {
 }
 
 function emptyPeak(): SfgPeakParams {
-  return { amplitude: 1.0, center: 3200, width: 10, phase: 0 }
+  return { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_fwhm: 0 }
 }
 
 function safeArr(arr: number[]): number[] {
@@ -292,20 +293,18 @@ function buildPhaseScanData(
 }
 
 function parseParamsFile(text: string, phaseUnit: PhaseUnit): FittingParams | null {
-  const kv = parseParameterValues(text)
-  const peakIndices: number[] = []
-  for (const key of Object.keys(kv)) {
-    const m = key.match(/^A(\d+)$/)
-    if (m) peakIndices.push(parseInt(m[1]))
+  const fields = parseParameterFields(text)
+  const numberValue = (key: string, fallback: number) => {
+    const parsed = Number(fields[key])
+    return Number.isFinite(parsed) ? parsed : fallback
   }
-  peakIndices.sort((a, b) => a - b)
-  const peaks: SfgPeakParams[] = peakIndices.map((n) => ({
-    amplitude: kv[`A${n}`] ?? 1.0,
-    center: kv[`Omega${n}`] ?? 3000,
-    width: kv[`Gamma${n}`] ?? 10,
-    phase: phaseFromDisplay(kv[`Phi${n}`] ?? 0, phaseUnit),
-  }))
-  return { nr_real: kv.NR_Real ?? 0, nr_imag: kv.NR_Imag ?? 0, peaks }
+  const peakIndices = importedPeakIndices(fields)
+  const peaks: SfgPeakParams[] = peakIndices.length > 0
+    ? peakIndices.map((n) => buildImportedPeak(fields, n, phaseUnit, 3000))
+    : (fields.Amplitude != null || fields.amplitude != null || fields.profile_type != null)
+      ? [buildImportedPeak(fields, null, phaseUnit, 3200)]
+      : []
+  return { nr_real: numberValue('NR_Real', 0), nr_imag: numberValue('NR_Imag', 0), peaks }
 }
 
 export default function MemVsFittingPage() {
@@ -679,9 +678,13 @@ export default function MemVsFittingPage() {
     peaks.forEach((peak, index) => {
       const n = index + 1
       lines.push(
+        `Profile${n}=${peak.profile_type ?? 'lorentzian'}`,
         `A${n}=${formatParameterNumber(peak.amplitude)}`,
         `Omega${n}=${formatParameterNumber(peak.center)}`,
         `Gamma${n}=${formatParameterNumber(peak.width)}`,
+        `Lorentzian_HWHM${n}=${formatParameterNumber(peak.width)}`,
+        `Lorentzian_FWHM${n}=${formatParameterNumber(2 * peak.width)}`,
+        `Gaussian_FWHM${n}=${formatParameterNumber(peak.gaussian_fwhm ?? 0)}`,
         `Phi${n}=${formatPhaseForUnit(peak.phase, phaseUnit)}`,
       )
     })
@@ -953,6 +956,7 @@ export default function MemVsFittingPage() {
         </Space>
         <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 8 }}>
           Phi display, manual input, parameter import and parameter export use this unit; backend calculation uses radians.
+          Lorentzian width keeps the original Gamma HWHM convention; Gaussian broadening is FWHM for Voigt peaks.
         </Text>
         <Row gutter={[12, 8]}>
           <Col xs={12} md={6}>
@@ -974,15 +978,36 @@ export default function MemVsFittingPage() {
                 <Button size="small" danger icon={<DeleteOutlined />} onClick={() => setPeaks(peaks.filter((_, idx) => idx !== i))} />
               }>
                 <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  <Select
+                    value={p.profile_type ?? 'lorentzian'}
+                    onChange={(value) => setPeaks(peaks.map((pp, ii) => (
+                      ii === i ? { ...pp, profile_type: normalizeProfileType(value) } : pp
+                    )))}
+                    options={profileTypeOptions}
+                    style={{ width: '100%' }}
+                    size="small"
+                  />
                   <InputNumber addonBefore="A" value={p.amplitude} onChange={(v) => {
                     if (v != null) setPeaks(peaks.map((pp, ii) => ii === i ? { ...pp, amplitude: v } : pp))
                   }} step={0.1} style={{ width: '100%' }} size="small" />
                   <InputNumber addonBefore="Omega" value={p.center} onChange={(v) => {
                     if (v != null) setPeaks(peaks.map((pp, ii) => ii === i ? { ...pp, center: v } : pp))
                   }} step={1} style={{ width: '100%' }} size="small" />
-                  <InputNumber addonBefore="Gamma" value={p.width} onChange={(v) => {
+                  <InputNumber addonBefore="L HWHM" value={p.width} onChange={(v) => {
                     if (v != null) setPeaks(peaks.map((pp, ii) => ii === i ? { ...pp, width: v } : pp))
                   }} step={0.5} min={0.1} style={{ width: '100%' }} size="small" />
+                  <InputNumber
+                    addonBefore="G FWHM"
+                    value={p.gaussian_fwhm ?? 0}
+                    disabled={(p.profile_type ?? 'lorentzian') === 'lorentzian'}
+                    onChange={(v) => {
+                      if (v != null) setPeaks(peaks.map((pp, ii) => ii === i ? { ...pp, gaussian_fwhm: v } : pp))
+                    }}
+                    step={0.5}
+                    min={0}
+                    style={{ width: '100%' }}
+                    size="small"
+                  />
                   <InputNumber
                     addonBefore={`Phase (${phaseUnitSymbol(phaseUnit)})`}
                     value={phaseToDisplay(p.phase, phaseUnit)}

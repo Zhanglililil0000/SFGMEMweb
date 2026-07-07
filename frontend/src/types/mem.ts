@@ -41,6 +41,8 @@ export interface SfgPeakParams {
   center: number
   width: number
   phase: number
+  profile_type?: 'lorentzian' | 'voigt'
+  gaussian_fwhm?: number
 }
 
 export interface SfgGenerateRequest {
