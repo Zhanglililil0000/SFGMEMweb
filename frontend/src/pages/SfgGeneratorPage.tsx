@@ -1,9 +1,21 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import 'plotly.js/dist/plotly.min.js'
-import { Row, Col, Card, InputNumber, Button, Switch, Typography, message, Space, Divider, Alert, Upload } from 'antd'
+import { Row, Col, Card, InputNumber, Button, Switch, Typography, message, Space, Divider, Alert, Upload, Select } from 'antd'
 import { DownloadOutlined, PlusOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons'
 import * as api from '../api/mem'
 import type { SfgPeakParams, SfgResult } from '../types/mem'
+import {
+  formatParameterNumber,
+  formatPhaseForUnit,
+  parseParameterValues,
+  phaseFromDisplay,
+  phaseInputStep,
+  phaseToDisplay,
+  phaseUnitName,
+  phaseUnitOptions,
+  phaseUnitSymbol,
+  type PhaseUnit,
+} from '../utils/phaseUnit'
 
 const Plotly = (window as any).Plotly
 const { Text } = Typography
@@ -29,6 +41,7 @@ export default function SfgGeneratorPage() {
     { amplitude: 1.0, center: 3200, width: 10, phase: 0 },
     { amplitude: 0.8, center: 3400, width: 15, phase: 0 },
   ])
+  const [phaseUnit, setPhaseUnit] = useState<PhaseUnit>('degrees')
   const [showSubpeaks, setShowSubpeaks] = useState(false)
   const [result, setResult] = useState<SfgResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -126,21 +139,16 @@ export default function SfgGeneratorPage() {
     setPeaks(peaks.map((p, idx) => (idx === i ? { ...p, [field]: value } : p)))
   }
 
+  const updatePeakPhase = (i: number, value: number | null) => {
+    if (value == null) return
+    setPeaks(peaks.map((p, idx) => (idx === i ? { ...p, phase: phaseFromDisplay(value, phaseUnit) } : p)))
+  }
+
   const handleImportParams = (file: File) => {
     const reader = new FileReader()
     reader.onload = (e) => {
       const text = e.target?.result as string
-      const kv: Record<string, number> = {}
-      for (const line of text.split('\n')) {
-        const trimmed = line.trim()
-        if (!trimmed || trimmed.startsWith('#')) continue
-        const eq = trimmed.indexOf('=')
-        if (eq === -1) continue
-        const key = trimmed.slice(0, eq).trim()
-        const val = parseFloat(trimmed.slice(eq + 1).trim())
-        if (isNaN(val)) continue
-        kv[key] = val
-      }
+      const kv = parseParameterValues(text)
 
       if (kv.NR_Real !== undefined) setNrReal(kv.NR_Real)
       if (kv.NR_Imag !== undefined) setNrImag(kv.NR_Imag)
@@ -157,16 +165,40 @@ export default function SfgGeneratorPage() {
           amplitude: kv[`A${n}`] ?? 1.0,
           center: kv[`Omega${n}`] ?? 3000 + n * 50,
           width: kv[`Gamma${n}`] ?? 10,
-          phase: kv[`Phi${n}`] ?? 0,
+          phase: phaseFromDisplay(kv[`Phi${n}`] ?? 0, phaseUnit),
         }))
         setPeaks(importedPeaks)
-        message.success(`Imported ${importedPeaks.length} peak(s)`)
+        message.success(`Imported ${importedPeaks.length} peak(s); Phi interpreted as ${phaseUnitName(phaseUnit)}`)
       } else {
         message.warning('No peak parameters found in file')
       }
     }
     reader.readAsText(file)
     return false
+  }
+
+  const handleExportParams = () => {
+    const lines = [
+      '# SFG parameters',
+      `# Phase unit: ${phaseUnitName(phaseUnit)}`,
+      `NR_Real=${formatParameterNumber(nrReal)}`,
+      `NR_Imag=${formatParameterNumber(nrImag)}`,
+    ]
+    peaks.forEach((peak, index) => {
+      const n = index + 1
+      lines.push(
+        `A${n}=${formatParameterNumber(peak.amplitude)}`,
+        `Omega${n}=${formatParameterNumber(peak.center)}`,
+        `Gamma${n}=${formatParameterNumber(peak.width)}`,
+        `Phi${n}=${formatPhaseForUnit(peak.phase, phaseUnit)}`,
+      )
+    })
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = 'SFG_parameters.txt'
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    message.success(`Parameters exported (Phase unit: ${phaseUnitName(phaseUnit)})`)
   }
 
   return (
@@ -189,10 +221,24 @@ export default function SfgGeneratorPage() {
           <Space>
             <Text strong>Peaks ({peaks.length})</Text>
             <Button size="small" icon={<PlusOutlined />} onClick={addPeak}>Add</Button>
-            <Upload accept=".txt" maxCount={1} showUploadList={false} beforeUpload={handleImportParams}>
+            <Upload accept=".txt,.csv" maxCount={1} showUploadList={false} beforeUpload={handleImportParams}>
               <Button size="small" icon={<UploadOutlined />}>Import</Button>
             </Upload>
+            <Button size="small" icon={<DownloadOutlined />} onClick={handleExportParams}>Export Params</Button>
           </Space>
+          <Space wrap style={{ marginTop: 8 }}>
+            <Text strong>Phase unit</Text>
+            <Select
+              size="small"
+              value={phaseUnit}
+              onChange={setPhaseUnit}
+              options={phaseUnitOptions}
+              style={{ width: 150 }}
+            />
+          </Space>
+          <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+            Phi display, manual input, parameter import and parameter export use this unit; backend calculation uses radians.
+          </Text>
           {peaks.map((p, i) => (
             <Card key={i} size="small" style={{ marginTop: 8 }} title={<Text style={{ fontSize: 13 }}>Peak {i + 1}</Text>} extra={
               <Button size="small" danger icon={<DeleteOutlined />} onClick={() => removePeak(i)} />
@@ -201,7 +247,13 @@ export default function SfgGeneratorPage() {
                 <InputNumber addonBefore="Amplitude" value={p.amplitude} onChange={(v) => updatePeak(i, 'amplitude', v)} step={0.1} style={{ width: 180 }} />
                 <InputNumber addonBefore="Center" value={p.center} onChange={(v) => updatePeak(i, 'center', v)} step={1} style={{ width: 180 }} />
                 <InputNumber addonBefore="Width" value={p.width} onChange={(v) => updatePeak(i, 'width', v)} step={0.5} min={0.1} style={{ width: 180 }} />
-                <InputNumber addonBefore="Phase" value={p.phase} onChange={(v) => updatePeak(i, 'phase', v)} step={0.01} style={{ width: 180 }} />
+                <InputNumber
+                  addonBefore={`Phase (${phaseUnitSymbol(phaseUnit)})`}
+                  value={phaseToDisplay(p.phase, phaseUnit)}
+                  onChange={(v) => updatePeakPhase(i, v)}
+                  step={phaseInputStep(phaseUnit)}
+                  style={{ width: 180 }}
+                />
               </Space>
             </Card>
           ))}

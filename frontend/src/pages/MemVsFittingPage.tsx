@@ -7,11 +7,28 @@ import {
 import { DownloadOutlined, InboxOutlined, PlayCircleOutlined, UploadOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons'
 import * as api from '../api/mem'
 import type { ColumnInfo, SfgPeakParams, FittingParams, MemCompareResult } from '../types/mem'
+import {
+  degToRad,
+  formatParameterNumber,
+  formatPhaseForUnit,
+  parseParameterValues,
+  phaseFromDisplay,
+  phaseInputStep,
+  radToDeg,
+  phaseToDisplay,
+  phaseUnitName,
+  phaseUnitOptions,
+  phaseUnitSymbol,
+  type PhaseUnit,
+} from '../utils/phaseUnit'
 
 const Plotly = (window as any).Plotly
 const { Text } = Typography
 
-const PHASE_SAMPLES = 100
+const DEFAULT_PHASE_SCAN_START_DEG = 0
+const DEFAULT_PHASE_SCAN_END_DEG = 360
+const DEFAULT_PHASE_SCAN_STEP_DEG = 0.5
+const MAX_PHASE_SCAN_POINTS = 5000
 const MAX_MEM_CALCULATION_POINTS = 20000
 const NRMSE_EPSILON = 1e-12
 
@@ -20,14 +37,6 @@ const chartConfig = {
   modeBarButtonsToRemove: ['lasso2d', 'select2d'],
   displaylogo: false,
   scrollZoom: true,
-}
-
-const marks: Record<number, string> = {
-  0: '0',
-  1.57: 'pi/2',
-  3.14: 'pi',
-  4.71: '3pi/2',
-  6.28: '2pi',
 }
 
 function emptyPeak(): SfgPeakParams {
@@ -56,8 +65,34 @@ function rangeText(range?: [number, number]): string {
   return range ? `${range[0]} to ${range[1]}` : ''
 }
 
-function radToDeg(rad: number): number {
-  return rad * 180 / Math.PI
+function buildPhaseValuesFromDegrees(
+  startDeg: number | null,
+  endDeg: number | null,
+  stepDeg: number | null,
+): { phaseValues: number[]; error: string | null } {
+  if (startDeg == null || endDeg == null || stepDeg == null) {
+    return { phaseValues: [], error: 'Error phase start, end and step cannot be empty.' }
+  }
+  if (!Number.isFinite(startDeg) || !Number.isFinite(endDeg) || !Number.isFinite(stepDeg)) {
+    return { phaseValues: [], error: 'Error phase start, end and step must be finite numbers.' }
+  }
+  if (startDeg >= endDeg) {
+    return { phaseValues: [], error: 'Error phase start must be less than error phase end.' }
+  }
+  if (stepDeg <= 0) {
+    return { phaseValues: [], error: 'Error phase step must be greater than 0 degrees.' }
+  }
+  const estimatedPoints = Math.floor((endDeg - startDeg) / stepDeg) + 1
+  if (estimatedPoints > MAX_PHASE_SCAN_POINTS) {
+    return { phaseValues: [], error: `Error phase scan would create ${estimatedPoints} points; please use at most ${MAX_PHASE_SCAN_POINTS}.` }
+  }
+
+  const phaseValues: number[] = []
+  const epsilon = Math.abs(stepDeg) * 1e-9
+  for (let value = startDeg; value <= endDeg + epsilon; value += stepDeg) {
+    phaseValues.push(degToRad(Number(value.toFixed(12))))
+  }
+  return { phaseValues, error: null }
 }
 
 function findMinIndex(values: number[]): number {
@@ -151,11 +186,13 @@ function buildNrmseSeries(
     warnings,
     pointCount: pointIndices.length,
     reBest: {
+      index: reMinIndex,
       phaseRad: phaseValues[reMinIndex],
       phaseDeg: phaseDeg[reMinIndex],
       value: reNrmse[reMinIndex],
     },
     imBest: {
+      index: imMinIndex,
       phaseRad: phaseValues[imMinIndex],
       phaseDeg: phaseDeg[imMinIndex],
       value: imNrmse[imMinIndex],
@@ -254,18 +291,8 @@ function buildPhaseScanData(
   }
 }
 
-function parseParamsFile(text: string): FittingParams | null {
-  const kv: Record<string, number> = {}
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#')) continue
-    const eq = trimmed.indexOf('=')
-    if (eq === -1) continue
-    const key = trimmed.slice(0, eq).trim()
-    const val = parseFloat(trimmed.slice(eq + 1).trim())
-    if (isNaN(val)) continue
-    kv[key] = val
-  }
+function parseParamsFile(text: string, phaseUnit: PhaseUnit): FittingParams | null {
+  const kv = parseParameterValues(text)
   const peakIndices: number[] = []
   for (const key of Object.keys(kv)) {
     const m = key.match(/^A(\d+)$/)
@@ -276,7 +303,7 @@ function parseParamsFile(text: string): FittingParams | null {
     amplitude: kv[`A${n}`] ?? 1.0,
     center: kv[`Omega${n}`] ?? 3000,
     width: kv[`Gamma${n}`] ?? 10,
-    phase: kv[`Phi${n}`] ?? 0,
+    phase: phaseFromDisplay(kv[`Phi${n}`] ?? 0, phaseUnit),
   }))
   return { nr_real: kv.NR_Real ?? 0, nr_imag: kv.NR_Imag ?? 0, peaks }
 }
@@ -298,8 +325,13 @@ export default function MemVsFittingPage() {
   const [nrReal, setNrReal] = useState(0.0)
   const [nrImag, setNrImag] = useState(0.0)
   const [peaks, setPeaks] = useState<SfgPeakParams[]>([])
+  const [phaseUnit, setPhaseUnit] = useState<PhaseUnit>('degrees')
 
   const [phaseAngle, setPhaseAngle] = useState(0)
+  const [phaseSelectionMode, setPhaseSelectionMode] = useState<'default' | 'manual'>('default')
+  const [phaseScanStartDeg, setPhaseScanStartDeg] = useState<number | null>(DEFAULT_PHASE_SCAN_START_DEG)
+  const [phaseScanEndDeg, setPhaseScanEndDeg] = useState<number | null>(DEFAULT_PHASE_SCAN_END_DEG)
+  const [phaseScanStepDeg, setPhaseScanStepDeg] = useState<number | null>(DEFAULT_PHASE_SCAN_STEP_DEG)
   const [windowNrmseEnabled, setWindowNrmseEnabled] = useState(false)
   const [windowStart, setWindowStart] = useState<number | null>(null)
   const [windowEnd, setWindowEnd] = useState<number | null>(null)
@@ -310,16 +342,14 @@ export default function MemVsFittingPage() {
   const nrmseRef = useRef<HTMLDivElement>(null)
   const intensityRef = useRef<HTMLDivElement>(null)
 
-  const phaseValues = useMemo(() => {
-    const arr: number[] = []
-    for (let i = 0; i <= PHASE_SAMPLES; i++) {
-      arr.push((2 * Math.PI * i) / PHASE_SAMPLES)
-    }
-    return arr
-  }, [])
+  const phaseScanConfig = useMemo(() => (
+    buildPhaseValuesFromDegrees(phaseScanStartDeg, phaseScanEndDeg, phaseScanStepDeg)
+  ), [phaseScanStartDeg, phaseScanEndDeg, phaseScanStepDeg])
+
+  const phaseValues = phaseScanConfig.phaseValues
 
   const phaseScanData = useMemo(() => {
-    if (!result) return null
+    if (!result || phaseValues.length === 0) return null
     return buildPhaseScanData(result, phaseValues, {
       enabled: windowNrmseEnabled,
       start: windowStart,
@@ -335,6 +365,50 @@ export default function MemVsFittingPage() {
       setWindowEdited(false)
     }
   }, [result, windowEdited, windowStart, windowEnd])
+
+  const defaultPhaseSelection = useMemo(() => {
+    if (!phaseScanData || 'alignmentError' in phaseScanData) return null
+
+    if (windowNrmseEnabled && phaseScanData.windowMetrics && phaseScanData.windowInfo) {
+      const index = phaseScanData.windowMetrics.imBest.index
+      return {
+        phaseRad: phaseScanData.windowMetrics.imBest.phaseRad,
+        phaseDeg: phaseScanData.windowMetrics.imBest.phaseDeg,
+        imNrmse: phaseScanData.windowMetrics.imBest.value,
+        reNrmseAtPhase: phaseScanData.windowMetrics.reNrmse[index],
+        criterionKey: 'minimum_im_nrmse_selected_window',
+        label: 'Selected-window minimum Im-NRMSE',
+        windowLabel: `${phaseScanData.windowInfo.effectiveStart.toFixed(2)}-${phaseScanData.windowInfo.effectiveEnd.toFixed(2)} cm^-1`,
+      }
+    }
+
+    const index = phaseScanData.imBest.index
+    return {
+      phaseRad: phaseScanData.imBest.phaseRad,
+      phaseDeg: phaseScanData.imBest.phaseDeg,
+      imNrmse: phaseScanData.imBest.value,
+      reNrmseAtPhase: phaseScanData.reNrmse[index],
+      criterionKey: 'minimum_im_nrmse_full',
+      label: 'Full-range minimum Im-NRMSE',
+      windowLabel: '',
+    }
+  }, [phaseScanData, windowNrmseEnabled])
+
+  useEffect(() => {
+    if (phaseSelectionMode !== 'default' || !defaultPhaseSelection) return
+    setPhaseAngle(defaultPhaseSelection.phaseRad)
+  }, [phaseSelectionMode, defaultPhaseSelection?.phaseRad])
+
+  const selectedPhaseDeg = radToDeg(phaseAngle)
+  const phaseSliderMinDeg = phaseScanStartDeg != null && phaseScanEndDeg != null && phaseScanStartDeg < phaseScanEndDeg
+    ? phaseScanStartDeg
+    : DEFAULT_PHASE_SCAN_START_DEG
+  const phaseSliderMaxDeg = phaseScanStartDeg != null && phaseScanEndDeg != null && phaseScanStartDeg < phaseScanEndDeg
+    ? phaseScanEndDeg
+    : DEFAULT_PHASE_SCAN_END_DEG
+  const currentSelectionLabel = phaseSelectionMode === 'default' && defaultPhaseSelection
+    ? defaultPhaseSelection.label
+    : 'Manual selection'
 
   const currentRotated = useMemo(() => {
     if (!result) return null
@@ -360,14 +434,17 @@ export default function MemVsFittingPage() {
       { x: w, y: safeArr(result.fitting_imag), type: 'scatter', mode: 'lines', name: 'Fitting Im[chi]', line: { color: '#3498db', width: 1.5, dash: 'dash' } },
     ]
     Plotly.newPlot(comparisonRef.current, traces, {
-      title: { text: 'Comparison: MEM vs Fitting', font: { size: 14 } },
+      title: {
+        text: `MEM reconstruction at error phase = ${selectedPhaseDeg.toFixed(2)}\u00b0 (${phaseAngle.toFixed(6)} rad)<br><sup>Selection: ${currentSelectionLabel}</sup>`,
+        font: { size: 14 },
+      },
       xaxis: { title: 'Wavenumber (cm<sup>-1</sup>)' },
       yaxis: { title: 'chi' },
       hovermode: 'x',
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
     }, chartConfig)
-  }, [result, currentRotated])
+  }, [result, currentRotated, selectedPhaseDeg, phaseAngle, currentSelectionLabel])
 
   useEffect(() => {
     if (!result || !intensityRef.current) return
@@ -407,21 +484,21 @@ export default function MemVsFittingPage() {
     const gd = diffRef.current
     const pv = phaseScanData.phaseDeg
     const allY = phaseScanData.diffReal.concat(phaseScanData.diffImag)
-    const yMax = Math.max(...allY) * 1.1
+    const yMax = Math.max(...allY) * 1.1 || 1
     const traces: any[] = [
       { x: pv, y: phaseScanData.diffReal, type: 'scatter', mode: 'lines', name: 'Real Part Diff', line: { color: '#e74c3c', width: 2 } },
       { x: pv, y: phaseScanData.diffImag, type: 'scatter', mode: 'lines', name: 'Imaginary Part Diff', line: { color: '#3498db', width: 2 } },
     ]
     traces.push({
-      x: [radToDeg(phaseAngle), radToDeg(phaseAngle)],
+      x: [selectedPhaseDeg, selectedPhaseDeg],
       y: [0, yMax],
       type: 'scatter', mode: 'lines',
-      name: 'current', line: { color: '#999', width: 1, dash: 'dash' },
+      name: 'Selected phase', line: { color: '#999', width: 1, dash: 'dash' },
       showlegend: false,
     })
     Plotly.newPlot(gd, traces, {
       title: { text: 'Error Phase Difference — click to set phase', font: { size: 14 } },
-      xaxis: { title: 'Error phase (degree)', range: [0, 360] },
+      xaxis: { title: 'Error phase (\u00b0)', range: [Math.min(...pv), Math.max(...pv)] },
       yaxis: { title: 'Sum |diff|' },
       hovermode: 'x',
       margin: { l: 60, r: 20, t: 50, b: 45 },
@@ -430,23 +507,21 @@ export default function MemVsFittingPage() {
     const onClick = (eventData: any) => {
       if (eventData?.points?.[0]) {
         const x = eventData.points[0].x as number
-        if (x >= 0 && x <= 360) {
-          const phaseRad = x * Math.PI / 180
-          setPhaseAngle(Math.round(phaseRad * 100) / 100)
-        }
+        setPhaseAngle(degToRad(x))
+        setPhaseSelectionMode('manual')
       }
     }
     ;(gd as any).on?.('plotly_click', onClick)
     return () => {
       ;(gd as any).removeAllListeners?.('plotly_click')
     }
-  }, [phaseScanData, phaseAngle])
+  }, [phaseScanData, selectedPhaseDeg])
 
   useEffect(() => {
     if (!result || !phaseScanData || 'alignmentError' in phaseScanData || !nrmseRef.current) return
     const nrmseYValues = phaseScanData.reNrmse.concat(phaseScanData.imNrmse)
       .concat(phaseScanData.windowMetrics ? phaseScanData.windowMetrics.reNrmse.concat(phaseScanData.windowMetrics.imNrmse) : [])
-    const yMax = Math.max(...nrmseYValues) * 1.1
+    const yMax = Math.max(...nrmseYValues) * 1.1 || 1
     const traces: any[] = [
       {
         x: phaseScanData.phaseDeg,
@@ -519,23 +594,34 @@ export default function MemVsFittingPage() {
       )
     }
     traces.push({
-      x: [radToDeg(phaseAngle), radToDeg(phaseAngle)],
+      x: [selectedPhaseDeg, selectedPhaseDeg],
       y: [0, yMax],
       type: 'scatter',
       mode: 'lines',
-      name: 'current',
+      name: 'Selected phase',
       line: { color: '#999', width: 1, dash: 'dash' },
       showlegend: false,
     })
     Plotly.newPlot(nrmseRef.current, traces, {
       title: { text: 'Full range and Selected window NRMSE vs Error Phase', font: { size: 14 } },
-      xaxis: { title: 'Error phase (degree)', range: [0, 360] },
+      xaxis: { title: 'Error phase (\u00b0)', range: [Math.min(...phaseScanData.phaseDeg), Math.max(...phaseScanData.phaseDeg)] },
       yaxis: { title: 'NRMSE' },
       hovermode: 'x',
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
     }, chartConfig)
-  }, [phaseScanData, phaseAngle, result])
+    const onClick = (eventData: any) => {
+      if (eventData?.points?.[0]) {
+        const x = eventData.points[0].x as number
+        setPhaseAngle(degToRad(x))
+        setPhaseSelectionMode('manual')
+      }
+    }
+    ;(nrmseRef.current as any).on?.('plotly_click', onClick)
+    return () => {
+      ;(nrmseRef.current as any)?.removeAllListeners?.('plotly_click')
+    }
+  }, [phaseScanData, selectedPhaseDeg, result])
 
   const handleFileUpload = (f: File) => {
     const reader = new FileReader()
@@ -569,18 +655,42 @@ export default function MemVsFittingPage() {
     const reader = new FileReader()
     reader.onload = (e) => {
       const text = e.target?.result as string
-      const parsed = parseParamsFile(text)
+      const parsed = parseParamsFile(text, phaseUnit)
       if (parsed) {
         setNrReal(parsed.nr_real)
         setNrImag(parsed.nr_imag)
         setPeaks(parsed.peaks)
-        message.success(`Imported ${parsed.peaks.length} peak(s)`)
+        message.success(`Imported ${parsed.peaks.length} peak(s); Phi interpreted as ${phaseUnitName(phaseUnit)}`)
       } else {
         message.warning('No valid parameters found')
       }
     }
     reader.readAsText(f)
     return false
+  }
+
+  const handleExportParams = () => {
+    const lines = [
+      '# MEM vs Fitting parameters',
+      `# Phase unit: ${phaseUnitName(phaseUnit)}`,
+      `NR_Real=${formatParameterNumber(nrReal)}`,
+      `NR_Imag=${formatParameterNumber(nrImag)}`,
+    ]
+    peaks.forEach((peak, index) => {
+      const n = index + 1
+      lines.push(
+        `A${n}=${formatParameterNumber(peak.amplitude)}`,
+        `Omega${n}=${formatParameterNumber(peak.center)}`,
+        `Gamma${n}=${formatParameterNumber(peak.width)}`,
+        `Phi${n}=${formatPhaseForUnit(peak.phase, phaseUnit)}`,
+      )
+    })
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = 'Fitting_parameters.txt'
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    message.success(`Parameters exported (Phase unit: ${phaseUnitName(phaseUnit)})`)
   }
 
   const handleRun = async () => {
@@ -599,6 +709,7 @@ export default function MemVsFittingPage() {
       const fitParams: FittingParams = { nr_real: nrReal, nr_imag: nrImag, peaks }
       const data = await api.runMemCompare(file, nn ?? undefined, memPoints, selectedColumn, fitParams)
       setResult(data)
+      setPhaseSelectionMode('default')
       setPhaseAngle(0)
       if (comparisonRef.current) Plotly.purge(comparisonRef.current)
       if (diffRef.current) Plotly.purge(diffRef.current)
@@ -618,7 +729,15 @@ export default function MemVsFittingPage() {
       '# mem_frequency_range,' + rangeText(result?.mem_frequency_range),
       '# resampling_method,' + cell(result?.resampling_method),
       '# NN,' + cell(result?.nn),
+      '# error_phase_deg,' + cell(selectedPhaseDeg),
       '# error_phase_rad,' + cell(phaseAngle),
+      '# default_display_phase_deg,' + cell(defaultPhaseSelection?.phaseDeg),
+      '# default_display_phase_rad,' + cell(defaultPhaseSelection?.phaseRad),
+      '# default_display_criterion,' + cell(defaultPhaseSelection?.criterionKey),
+      '# primary_nrmse_source,' + (phaseScanData.windowMetrics ? 'selected_window' : 'full_range'),
+      '# error_phase_scan_start_deg,' + cell(phaseScanStartDeg ?? undefined),
+      '# error_phase_scan_end_deg,' + cell(phaseScanEndDeg ?? undefined),
+      '# error_phase_scan_step_deg,' + cell(phaseScanStepDeg ?? undefined),
       '# note,' + cell(result?.resampling_note),
       '# full_range_cm-1,' + rangeText(phaseScanData.fullRange),
       '# full_re_nrmse_optimal_phase_deg,' + cell(phaseScanData.reBest.phaseDeg),
@@ -643,8 +762,10 @@ export default function MemVsFittingPage() {
       ...(phaseScanData.windowMetrics ? phaseScanData.windowMetrics.warnings.map((warning) => '# warning,' + warning) : []),
     ]
     const header = [
-      'error_phase_rad',
       'error_phase_deg',
+      'error_phase_rad',
+      're_nrmse',
+      'im_nrmse',
       'RealDiff',
       'ImagDiff',
       're_absolute_error',
@@ -665,9 +786,13 @@ export default function MemVsFittingPage() {
     }
     lines.push(header.join(','))
     for (let i = 0; i < phaseScanData.phaseRad.length; i++) {
+      const primaryReNrmse = phaseScanData.windowMetrics ? phaseScanData.windowMetrics.reNrmse[i] : phaseScanData.reNrmse[i]
+      const primaryImNrmse = phaseScanData.windowMetrics ? phaseScanData.windowMetrics.imNrmse[i] : phaseScanData.imNrmse[i]
       const row = [
-        phaseScanData.phaseRad[i].toFixed(8),
         phaseScanData.phaseDeg[i].toFixed(6),
+        phaseScanData.phaseRad[i].toFixed(8),
+        primaryReNrmse.toExponential(6),
+        primaryImNrmse.toExponential(6),
         phaseScanData.diffReal[i].toExponential(6),
         phaseScanData.diffImag[i].toExponential(6),
         phaseScanData.diffReal[i].toExponential(6),
@@ -706,7 +831,12 @@ export default function MemVsFittingPage() {
       '# mem_frequency_range,' + rangeText(result.mem_frequency_range),
       '# resampling_method,' + cell(result.resampling_method),
       '# NN,' + cell(result.nn),
+      '# error_phase_deg,' + cell(selectedPhaseDeg),
       '# error_phase_rad,' + cell(phaseAngle),
+      '# phase_selection,' + currentSelectionLabel,
+      '# default_display_phase_deg,' + cell(defaultPhaseSelection?.phaseDeg),
+      '# default_display_phase_rad,' + cell(defaultPhaseSelection?.phaseRad),
+      '# default_display_criterion,' + cell(defaultPhaseSelection?.criterionKey),
       '# note,' + cell(result.resampling_note),
       'frequency_original,intensity_original,frequency_mem,intensity_mem_input,fitting_intensity,Re_mem,Im_mem,Re_ideal_on_mem_grid,Im_ideal_on_mem_grid,Re_residual,Im_residual',
     ]
@@ -808,10 +938,22 @@ export default function MemVsFittingPage() {
 
       <Card size="small" title="Fitting Parameters" style={{ marginTop: 12 }}>
         <Space wrap style={{ marginBottom: 8 }}>
-          <Upload accept=".txt" maxCount={1} showUploadList={false} beforeUpload={handleImportParams}>
-            <Button size="small" icon={<UploadOutlined />}>Import .txt</Button>
+          <Upload accept=".txt,.csv" maxCount={1} showUploadList={false} beforeUpload={handleImportParams}>
+            <Button size="small" icon={<UploadOutlined />}>Import Params</Button>
           </Upload>
+          <Button size="small" icon={<DownloadOutlined />} onClick={handleExportParams}>Export Params</Button>
+          <Text strong>Phase unit</Text>
+          <Select
+            size="small"
+            value={phaseUnit}
+            onChange={setPhaseUnit}
+            options={phaseUnitOptions}
+            style={{ width: 150 }}
+          />
         </Space>
+        <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 8 }}>
+          Phi display, manual input, parameter import and parameter export use this unit; backend calculation uses radians.
+        </Text>
         <Row gutter={[12, 8]}>
           <Col xs={12} md={6}>
             <InputNumber addonBefore="NR Real" value={nrReal} onChange={(v) => setNrReal(v ?? 0)}
@@ -841,9 +983,16 @@ export default function MemVsFittingPage() {
                   <InputNumber addonBefore="Gamma" value={p.width} onChange={(v) => {
                     if (v != null) setPeaks(peaks.map((pp, ii) => ii === i ? { ...pp, width: v } : pp))
                   }} step={0.5} min={0.1} style={{ width: '100%' }} size="small" />
-                  <InputNumber addonBefore="Phase" value={p.phase} onChange={(v) => {
-                    if (v != null) setPeaks(peaks.map((pp, ii) => ii === i ? { ...pp, phase: v } : pp))
-                  }} step={0.01} style={{ width: '100%' }} size="small" />
+                  <InputNumber
+                    addonBefore={`Phase (${phaseUnitSymbol(phaseUnit)})`}
+                    value={phaseToDisplay(p.phase, phaseUnit)}
+                    onChange={(v) => {
+                      if (v != null) setPeaks(peaks.map((pp, ii) => ii === i ? { ...pp, phase: phaseFromDisplay(v, phaseUnit) } : pp))
+                    }}
+                    step={phaseInputStep(phaseUnit)}
+                    style={{ width: '100%' }}
+                    size="small"
+                  />
                 </Space>
               </Card>
             </Col>
@@ -869,22 +1018,102 @@ export default function MemVsFittingPage() {
           </Card>
 
           <Card size="small" title="Error Phase Adjustment" style={{ marginTop: 12 }}>
-            <Row gutter={16} align="middle">
-              <Col flex="auto">
-                <Slider min={0} max={2 * Math.PI} step={0.01} value={phaseAngle}
-                  onChange={(v) => setPhaseAngle(v as number)} marks={marks} />
+            <Row gutter={[12, 8]} align="middle" style={{ marginBottom: 8 }}>
+              <Col>
+                <InputNumber
+                  addonBefore="Error phase start (\u00b0)"
+                  value={phaseScanStartDeg}
+                  step={0.5}
+                  onChange={(v) => {
+                    setPhaseScanStartDeg(v)
+                    setPhaseSelectionMode('default')
+                  }}
+                  style={{ width: 200 }}
+                  size="small"
+                />
               </Col>
               <Col>
-                <Space>
-                  <Text>phi =</Text>
-                  <InputNumber min={0} max={2 * Math.PI} step={0.01} value={phaseAngle}
-                    precision={4} onChange={(v) => { if (v != null) setPhaseAngle(v) }}
-                    style={{ width: 100 }} size="small" />
-                  <Text type="secondary" style={{ width: 50 }}>{(phaseAngle * 180 / Math.PI).toFixed(1)} deg</Text>
-                  <Button icon={<UndoOutlined />} size="small" onClick={() => setPhaseAngle(0)}>Reset</Button>
+                <InputNumber
+                  addonBefore="Error phase end (\u00b0)"
+                  value={phaseScanEndDeg}
+                  step={0.5}
+                  onChange={(v) => {
+                    setPhaseScanEndDeg(v)
+                    setPhaseSelectionMode('default')
+                  }}
+                  style={{ width: 190 }}
+                  size="small"
+                />
+              </Col>
+              <Col>
+                <InputNumber
+                  addonBefore="Error phase step (\u00b0)"
+                  value={phaseScanStepDeg}
+                  min={0.000001}
+                  step={0.5}
+                  onChange={(v) => {
+                    setPhaseScanStepDeg(v)
+                    setPhaseSelectionMode('default')
+                  }}
+                  style={{ width: 190 }}
+                  size="small"
+                />
+              </Col>
+            </Row>
+            <Row gutter={16} align="middle">
+              <Col flex="auto">
+                <Slider
+                  min={phaseSliderMinDeg}
+                  max={phaseSliderMaxDeg}
+                  step={phaseScanStepDeg && phaseScanStepDeg > 0 ? phaseScanStepDeg : DEFAULT_PHASE_SCAN_STEP_DEG}
+                  value={selectedPhaseDeg}
+                  disabled={!!phaseScanConfig.error}
+                  onChange={(v) => {
+                    setPhaseAngle(degToRad(v as number))
+                    setPhaseSelectionMode('manual')
+                  }}
+                />
+              </Col>
+              <Col>
+                <Space wrap>
+                  <Text>Selected error phase (\u00b0)</Text>
+                  <InputNumber
+                    min={phaseSliderMinDeg}
+                    max={phaseSliderMaxDeg}
+                    value={selectedPhaseDeg}
+                    step={phaseScanStepDeg && phaseScanStepDeg > 0 ? phaseScanStepDeg : DEFAULT_PHASE_SCAN_STEP_DEG}
+                    precision={6}
+                    onChange={(v) => {
+                      if (v != null) {
+                        setPhaseAngle(degToRad(v))
+                        setPhaseSelectionMode('manual')
+                      }
+                    }}
+                    style={{ width: 120 }}
+                    size="small"
+                  />
+                  <Text type="secondary" style={{ whiteSpace: 'nowrap' }}>
+                    {selectedPhaseDeg.toFixed(2)}\u00b0 = {phaseAngle.toFixed(6)} rad
+                  </Text>
+                  <Button
+                    icon={<UndoOutlined />}
+                    size="small"
+                    onClick={() => {
+                      setPhaseSelectionMode('default')
+                      if (defaultPhaseSelection) setPhaseAngle(defaultPhaseSelection.phaseRad)
+                    }}
+                  >
+                    Use Im-NRMSE default
+                  </Button>
                 </Space>
               </Col>
             </Row>
+            <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 6 }}>
+              GUI phase inputs and scan settings use degrees; internal MEM rotation uses radians.
+            </Text>
+            {phaseScanConfig.error && (
+              <Alert type="warning" message={phaseScanConfig.error} showIcon style={{ marginTop: 8 }} />
+            )}
           </Card>
 
           <Card size="small" title="Error Phase Difference" style={{ marginTop: 12 }}
@@ -901,7 +1130,13 @@ export default function MemVsFittingPage() {
                   <Col>
                     <Space>
                       <Text>Enable selected spectral window NRMSE</Text>
-                      <Switch checked={windowNrmseEnabled} onChange={setWindowNrmseEnabled} />
+                      <Switch
+                        checked={windowNrmseEnabled}
+                        onChange={(checked) => {
+                          setWindowNrmseEnabled(checked)
+                          setPhaseSelectionMode('default')
+                        }}
+                      />
                     </Space>
                   </Col>
                   <Col>
@@ -912,6 +1147,7 @@ export default function MemVsFittingPage() {
                       onChange={(v) => {
                         setWindowStart(v)
                         setWindowEdited(true)
+                        setPhaseSelectionMode('default')
                       }}
                       style={{ width: 180 }}
                       size="small"
@@ -925,6 +1161,7 @@ export default function MemVsFittingPage() {
                       onChange={(v) => {
                         setWindowEnd(v)
                         setWindowEdited(true)
+                        setPhaseSelectionMode('default')
                       }}
                       style={{ width: 180 }}
                       size="small"
@@ -936,18 +1173,42 @@ export default function MemVsFittingPage() {
                     </Text>
                   </Col>
                 </Row>
+                {defaultPhaseSelection && (
+                  <Space wrap style={{ marginBottom: 8, display: 'flex' }}>
+                    <Text type="secondary">
+                      Default displayed phase: {defaultPhaseSelection.phaseDeg.toFixed(2)}\u00b0
+                    </Text>
+                    <Text type="secondary">
+                      Equivalent internal phase: {defaultPhaseSelection.phaseRad.toFixed(6)} rad
+                    </Text>
+                    <Text type="secondary">
+                      Selection criterion: {defaultPhaseSelection.label}
+                    </Text>
+                    {defaultPhaseSelection.windowLabel && (
+                      <Text type="secondary">
+                        Window: {defaultPhaseSelection.windowLabel}
+                      </Text>
+                    )}
+                    <Text type="secondary">
+                      Minimum Im-NRMSE: {defaultPhaseSelection.imNrmse.toExponential(4)}
+                    </Text>
+                    <Text type="secondary">
+                      Re-NRMSE at this phase: {defaultPhaseSelection.reNrmseAtPhase.toExponential(4)}
+                    </Text>
+                  </Space>
+                )}
                 <Space wrap style={{ marginBottom: 8 }}>
                   <Text type="secondary">
                     Full range minimum Re-NRMSE: {phaseScanData.reBest.value.toExponential(4)}
                   </Text>
                   <Text type="secondary">
-                    Full range Re optimal phase: {phaseScanData.reBest.phaseDeg.toFixed(2)} deg
+                    Full range Re optimal phase: {phaseScanData.reBest.phaseDeg.toFixed(2)}\u00b0
                   </Text>
                   <Text type="secondary">
                     Full range minimum Im-NRMSE: {phaseScanData.imBest.value.toExponential(4)}
                   </Text>
                   <Text type="secondary">
-                    Full range Im optimal phase: {phaseScanData.imBest.phaseDeg.toFixed(2)} deg
+                    Full range Im optimal phase: {phaseScanData.imBest.phaseDeg.toFixed(2)}\u00b0
                   </Text>
                 </Space>
                 {windowNrmseEnabled && phaseScanData.windowInfo && phaseScanData.windowMetrics && (
@@ -962,13 +1223,13 @@ export default function MemVsFittingPage() {
                       Window minimum Re-NRMSE: {phaseScanData.windowMetrics.reBest.value.toExponential(4)}
                     </Text>
                     <Text type="secondary">
-                      Window Re optimal phase: {phaseScanData.windowMetrics.reBest.phaseDeg.toFixed(2)} deg
+                      Window Re optimal phase: {phaseScanData.windowMetrics.reBest.phaseDeg.toFixed(2)}\u00b0
                     </Text>
                     <Text type="secondary">
                       Window minimum Im-NRMSE: {phaseScanData.windowMetrics.imBest.value.toExponential(4)}
                     </Text>
                     <Text type="secondary">
-                      Window Im optimal phase: {phaseScanData.windowMetrics.imBest.phaseDeg.toFixed(2)} deg
+                      Window Im optimal phase: {phaseScanData.windowMetrics.imBest.phaseDeg.toFixed(2)}\u00b0
                     </Text>
                   </Space>
                 )}

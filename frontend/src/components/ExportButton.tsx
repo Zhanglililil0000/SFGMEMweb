@@ -1,5 +1,6 @@
 import { Button, message } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
+import { radToDeg } from '../utils/phaseUnit'
 
 interface ExportButtonProps {
   wavenumbers: number[]
@@ -52,6 +53,7 @@ function exportToCsv(props: ExportButtonProps) {
     '# mem_frequency_range,' + rangeText(memFrequencyRange),
     '# resampling_method,' + cell(resamplingMethod),
     '# NN,' + cell(nn),
+    '# error_phase_deg,' + cell(phaseAngle == null ? undefined : radToDeg(phaseAngle)),
     '# error_phase_rad,' + cell(phaseAngle),
     '# note,' + cell(resamplingNote),
     'frequency_original,intensity_original,frequency_mem,intensity_mem_input,Re_mem,Im_mem',

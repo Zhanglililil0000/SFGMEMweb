@@ -109,10 +109,10 @@ cd backend && python main.py           # 访问 :8000
 | 功能 | 说明 |
 |------|------|
 | 参数面板 | 波数范围、NR 实部/虚部、动态峰参数（振幅/中心/宽度/相位） |
-| 文件导入 | 支持 `.txt` 文件批量导入 `A{n}/Omega{n}/Gamma{n}/Phi{n}` 参数 |
+| 文件导入 | 支持 `.txt` / `.csv` 文件批量导入 `A{n}/Omega{n}/Gamma{n}/Phi{n}` 参数 |
 | 三图显示 | 强度、实部、虚部 — 各自上下排列 |
 | 子峰叠加 | 开关控制是否用虚线显示各峰分量 |
-| CSV 导出 | 含总谱与各子峰分量 |
+| CSV 导出 | 含总谱与各子峰分量；参数导出会注明当前 Phase unit |
 
 **参数文件格式示例** (`parameters.txt`)：
 
@@ -122,13 +122,25 @@ NR_Imag=0
 A1=1
 Omega1=2990
 Gamma1=3
-Phi1=0.5
+Phi1=90
 A2=2
 Omega2=2950
 Gamma2=4
 ```
 
 `Phi` 行可选，缺失时默认为 0。以 `#` 开头的行为注释。
+
+### Phase unit for Phi import/export / Phi 相位单位
+
+`SFG Generator` 和 `MEM vs Fitting` 的 fitting parameter 面板使用统一的 `Phase unit` 控件控制 `Phi` 的显示、手动输入、参数文件导入和参数文件导出。可选值为 `Degrees (°)` 与 `Radians (rad)`，默认值为 `Degrees (°)`。
+
+后端计算始终使用 radians。当前端选择 `Degrees (°)` 时，面板中的 `Phi=90` 会在发送给后端前转换为 `π/2 rad`；当前端选择 `Radians (rad)` 时，面板中的 `Phi=1.5708` 会直接作为弧度值发送给后端。
+
+导入 `.txt` 或 `.csv` 参数文件时，程序不会要求文件包含 `phase_unit` 字段，也不会根据数值大小自动猜测单位。导入的 `Phi` 数值始终按照当前 GUI 中选择的 `Phase unit` 解释。因此，若使用旧格式的弧度制参数文件，请先把 `Phase unit` 切换到 `Radians (rad)`，再执行导入。
+
+切换 `Degrees (°)` 与 `Radians (rad)` 时，当前面板中已有的全部 `Phi` 数值会自动换算，物理相位保持不变。例如 `90°` 切换到 radians 后显示约 `1.5708 rad`，再切回 degrees 后显示约 `90°`。
+
+导出参数文件时，`Phi` 会按照当前 GUI 选择的 `Phase unit` 输出；导出文件开头会写入类似 `# Phase unit: degrees` 或 `# Phase unit: radians` 的说明。
 
 ### 标签 3：MEM vs Fitting
 
@@ -137,7 +149,7 @@ Gamma2=4
 | 功能 | 说明 |
 |------|------|
 | Data Setup | 上传实验 CSV + 选择列 + 设置 NN 与 MEM calculation points |
-| Fitting Parameters | 输入/导入拟合参数（NR 实部/虚部 + 峰参数含相位），与 SFG Generator 格式一致 |
+| Fitting Parameters | 输入/导入拟合参数（NR 实部/虚部 + 峰参数含相位），与 SFG Generator 格式一致；`Phase unit` 控制 Phi 的显示、导入和导出 |
 | 对比图 | MEM Re[χ]/Im[χ]（实线） vs Fitting Re[χ]/Im[χ]（虚线）叠绘 |
 | 误差相位滑块 | 拖动 φ 实时旋转 MEM 曲线 |
 | 差异曲线 | 实部/虚部各自的 Σ|diff| vs φ 图，当前相位位置用虚线游标标出 |
@@ -183,6 +195,29 @@ GUI 使用步骤：
 `MEM vs Fitting` 页面会在 error phase 扫描中计算 NRMSE（Normalized Root Mean Square Error，归一化均方根误差），用于比较 MEM 重构的复谱与拟合参数生成的理想谱之间的相对误差，并辅助寻找更合适的 error phase。
 
 程序分别计算 Re-NRMSE 与 Im-NRMSE，因为实部和虚部的幅度、背景、相位敏感性可能不同；两个分量的最佳 error phase 不一定完全相同。
+
+### Error phase input unit / Error phase 输入单位
+
+GUI 中的 error phase 手动输入、phase scan 起点、终点和步长都使用 degree（°）。默认 phase scan 覆盖完整一圈 `0°` 到 `360°`；例如 `start = 0`、`end = 360`、`step = 0.5` 表示从 `0°` 到 `360°`，每 `0.5°` 扫描一次。
+
+后端和复谱旋转仍统一使用 radians。前端会在调用 error phase correction 或计算 phase scan 指标前自动执行：
+
+```
+phi_rad = phi_deg * pi / 180
+```
+
+界面会同时显示当前选择相位的 degree 与对应 internal phase（radian），例如 `30.00° = 0.523599 rad`。用户不需要手动把 degree 换算成 radian。后端 `/api/mem/phase` 接口仍保持兼容，`phase_angle` 字段含义仍为 radians。
+
+### Default displayed reconstruction / 默认展示的重构谱
+
+完成 error phase scan 后，如果用户尚未手动选择其他 phase，主 Re/Im 对比图会自动展示 Im-NRMSE 最小对应的 MEM 重构谱：
+
+- 未启用 selected spectral window 时，默认使用 full-range minimum Im-NRMSE 对应的 phase。
+- 启用 selected spectral window 且窗口有效时，默认使用 selected-window minimum Im-NRMSE 对应的 phase。
+
+结果区会显示 default displayed phase（degree）、equivalent internal phase（radian）、selection criterion、minimum Im-NRMSE，以及同一 phase 下的 Re-NRMSE。默认展示 phase 不一定与 Re-NRMSE 最小 phase 相同；这里优先选择 Im-NRMSE 最小，是为了优先展示虚部恢复最佳的结果。
+
+用户仍可通过 phase scan 图点击某个 phase，或在 `Selected error phase (°)` 输入框中手动输入其他 phase。手动切换后，主图标题和 phase scan 图中的竖线标记会同步更新。
 
 对每一个 error phase `φ`，先计算残差：
 
@@ -377,6 +412,7 @@ WN,Int
 # mem_frequency_range,2800 to 3800
 # resampling_method,Interpolated from 2000 to 5000 points
 # NN,1024
+# error_phase_deg,0
 # error_phase_rad,0
 frequency_original,intensity_original,frequency_mem,intensity_mem_input,Re_mem,Im_mem
 2800.0,0.0012,2800.0,0.0012,8.78283326e-03,-1.93211660e-02
@@ -387,8 +423,18 @@ frequency_original,intensity_original,frequency_mem,intensity_mem_input,Re_mem,I
 MEM vs Fitting 的 phase scan 导出包含原有 residual 指标和 full-range NRMSE 列：
 
 ```
-error_phase_rad,error_phase_deg,RealDiff,ImagDiff,re_absolute_error,im_absolute_error,re_residual_std,im_residual_std,re_nrmse_full,im_nrmse_full
+error_phase_deg,error_phase_rad,re_nrmse,im_nrmse,RealDiff,ImagDiff,re_absolute_error,im_absolute_error,re_residual_std,im_residual_std,re_nrmse_full,im_nrmse_full
 ```
+
+导出 metadata 会记录当前默认展示的 phase：
+
+```
+default_display_phase_deg
+default_display_phase_rad
+default_display_criterion
+```
+
+其中 `default_display_criterion` 可能为 `minimum_im_nrmse_full` 或 `minimum_im_nrmse_selected_window`。
 
 启用 selected-window NRMSE 且窗口有效时，会额外导出：
 
@@ -405,7 +451,7 @@ RMSE divided by RMS amplitude of the corresponding ideal spectrum
 
 导出 metadata 还会记录完整光谱范围、用户设定的窗口范围、实际用于计算的有效窗口范围、full-range optimal phase 和 windowed optimal phase。
 
-SFG Generator 导出包含总谱与各子峰分量。
+SFG Generator 导出包含总谱与各子峰分量。SFG Generator 和 MEM vs Fitting 的参数导出文件会按当前 `Phase unit` 输出 `Phi`，并在文件注释中写明 `Phase unit: degrees` 或 `Phase unit: radians`。
 
 ## MEM 算法
 
@@ -427,7 +473,7 @@ SFG Generator 导出包含总谱与各子峰分量。
 | `A_q` | 第 q 峰的振幅 |
 | `ω_q` | 第 q 峰的中心波数 |
 | `Γ_q` | 第 q 峰的宽度（半高半宽） |
-| `φ_q` | 第 q 峰的相位（rad，可选，默认 0） |
+| `φ_q` | 第 q 峰的相位（后端内部使用 rad；GUI 中 `Phi` 可由 `Phase unit` 选择 degrees 或 radians，默认 degrees） |
 
 强度 = |χ(ω)|²，实部 = Re[χ]，虚部 = Im[χ]。
 

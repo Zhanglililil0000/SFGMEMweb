@@ -1,6 +1,7 @@
 import { Slider, InputNumber, Button, Space, Card, Row, Col, Typography } from 'antd'
 import { UndoOutlined } from '@ant-design/icons'
 import ExportButton from './ExportButton'
+import { degToRad, radToDeg } from '../utils/phaseUnit'
 
 const { Text } = Typography
 
@@ -24,11 +25,11 @@ interface PhaseControlProps {
 }
 
 const marks: Record<number, string> = {
-  0: '0',
-  1.57: 'pi/2',
-  3.14: 'pi',
-  4.71: '3pi/2',
-  6.28: '2pi',
+  0: '0\u00b0',
+  90: '90\u00b0',
+  180: '180\u00b0',
+  270: '270\u00b0',
+  360: '360\u00b0',
 }
 
 const PhaseControl: React.FC<PhaseControlProps> = ({
@@ -49,6 +50,8 @@ const PhaseControl: React.FC<PhaseControlProps> = ({
   resamplingMethod,
   resamplingNote,
 }) => {
+  const phaseDeg = radToDeg(phaseAngle)
+
   return (
     <Card
       title="Error Phase Adjustment"
@@ -73,37 +76,37 @@ const PhaseControl: React.FC<PhaseControlProps> = ({
       }
     >
       <Text type="secondary" style={{ fontSize: 12, marginBottom: 8, display: 'block' }}>
-        Drag slider or enter value to adjust error phase phi (0-2pi).
+        Drag slider or enter value to adjust error phase phi in degrees.
+        The internal phase used for calculation is shown in radians.
         The imaginary part should approach zero in non-resonant regions for the physically correct solution.
       </Text>
       <Row gutter={16} align="middle">
         <Col flex="auto">
           <Slider
             min={0}
-            max={2 * Math.PI}
-            step={0.01}
-            value={phaseAngle}
-            onChange={(value) => onPhaseChange(value as number)}
+            max={360}
+            step={0.5}
+            value={phaseDeg}
+            onChange={(value) => onPhaseChange(degToRad(value as number))}
             marks={marks}
           />
         </Col>
         <Col>
           <Space>
-            <Text style={{ whiteSpace: 'nowrap' }}>phi =</Text>
+            <Text style={{ whiteSpace: 'nowrap' }}>Selected error phase (\u00b0)</Text>
             <InputNumber
               min={0}
-              max={2 * Math.PI}
-              step={0.01}
-              value={phaseAngle}
-              precision={4}
+              max={360}
+              step={0.5}
+              value={phaseDeg}
+              precision={6}
               onChange={(value) => {
-                if (value !== null) onPhaseChange(value)
+                if (value !== null) onPhaseChange(degToRad(value))
               }}
-              style={{ width: 100 }}
+              style={{ width: 120 }}
             />
-            <Text style={{ whiteSpace: 'nowrap' }}>rad</Text>
-            <Text type="secondary" style={{ whiteSpace: 'nowrap', width: 55 }}>
-              {(phaseAngle * 180 / Math.PI).toFixed(1)} deg
+            <Text type="secondary" style={{ whiteSpace: 'nowrap' }}>
+              {phaseDeg.toFixed(2)}\u00b0 = {phaseAngle.toFixed(6)} rad
             </Text>
             <Button icon={<UndoOutlined />} onClick={onReset} size="small">
               Reset
