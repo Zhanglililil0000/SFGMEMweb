@@ -259,7 +259,7 @@ async def mem_compare(
             peak_options=peak_options,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Fitting spectrum calculation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ideal spectrum from peak parameters calculation failed: {str(e)}")
 
     return {
         "wavenumbers": mem_wavenumbers.tolist(),

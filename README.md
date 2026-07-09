@@ -109,12 +109,12 @@ cd backend && python main.py           # 访问 :8000
 | 功能 | 说明 |
 |------|------|
 | 参数面板 | 波数范围、NR 实部/虚部、动态峰参数（线形/振幅/中心/Lorentzian HWHM/Gaussian FWHM/相位） |
-| 文件导入 | 支持 `.txt` / `.csv` 文件批量导入 `A{n}/Omega{n}/Gamma{n}/Phi{n}` 参数；缺少线形字段时默认 Lorentzian |
+| 文件导入 | 支持 `.txt` / `.csv` peak parameter file 批量导入 `A{n}/Omega{n}/Gamma{n}/Phi{n}` 参数；缺少线形字段时默认 Lorentzian |
 | 三图显示 | 强度、实部、虚部 — 各自上下排列 |
 | 子峰叠加 | 开关控制是否用虚线显示各峰分量 |
-| CSV 导出 | 含总谱与各子峰分量；参数导出会注明当前 Phase unit |
+| CSV 导出 | 含总谱与各子峰分量；peak parameter 导出会注明当前 Phase unit |
 
-**参数文件格式示例** (`parameters.txt`)：
+**Peak parameter file 格式示例** (`parameters.txt`)：
 
 ```
 NR_Real=1
@@ -144,38 +144,54 @@ Gaussian_FWHM2=12
 
 其中 `Gamma` / `width` / `Γ_q` 按旧程序定义为 Lorentzian HWHM（半高半宽），不是 FWHM。为了不改变旧参数文件的含义，`Gamma1=3` 仍表示 `Γ=3 cm^-1`。对应 Lorentzian FWHM 为 `2Γ`。
 
-Voigt 峰使用 `scipy.special.wofz` 计算 complex Voigt profile，即 Gaussian 非均匀展宽作用在复 Lorentzian 响应上。Gaussian 宽度在 GUI 和参数文件中使用 FWHM，内部转换为 `σ = FWHM / (2 sqrt(2 ln 2))`。程序不会对最终强度 `|χ|^2` 做卷积；总强度始终由总复响应计算：
+Voigt 峰使用的是 `backend/spectrum_models.py` 中的 `complex_voigt()` 函数。该函数调用 SciPy 的 `scipy.special.wofz`，也就是 Faddeeva function：
+
+```
+w(z) = exp(-z^2) erfc(-i z)
+```
+
+程序实现的是 **complex Voigt response**，即 Gaussian 非均匀展宽作用在复 Lorentzian 响应上，而不是只返回实数强度线形的 Voigt profile。代码中的定义为：
+
+```
+sigma = Gaussian_FWHM / (2 sqrt(2 ln 2))
+z = (omega - omega_q + i Gamma_q) / (sigma sqrt(2))
+V_complex(omega) = i sqrt(pi) wofz(z) / (sigma sqrt(2))
+chi_q(omega) = A_q exp(i phi_q) V_complex(omega)
+```
+
+其中 `Gamma` / `width` / `Γ_q` 仍是 Lorentzian HWHM，`Gaussian_FWHM` 在 GUI 和参数文件中使用 FWHM，内部再转换为 `sigma`。程序不会对最终强度 `|χ|^2` 做卷积；总强度始终由总复响应计算：
 
 ```
 Intensity(ω) = |χ_NR + Σχ_q(ω)|^2
 ```
 
-当 `Profile=voigt` 且 `Gaussian_FWHM=0` 时，Voigt 会退化为原来的 Lorentzian 结果。
+当 `Profile=voigt` 且 `Gaussian_FWHM=0` 时，`complex_voigt()` 会直接退化为原来的 Lorentzian 复响应。
 
 ### Phase unit for Phi import/export / Phi 相位单位
 
-`SFG Generator` 和 `MEM vs Fitting` 的 fitting parameter 面板使用统一的 `Phase unit` 控件控制 `Phi` 的显示、手动输入、参数文件导入和参数文件导出。可选值为 `Degrees (°)` 与 `Radians (rad)`，默认值为 `Degrees (°)`。
+`SFG Generator` 和 `MEM vs Fitting` 的 peak parameter 面板使用统一的 `Phase unit` 控件控制 `Phi` 的显示、手动输入、参数文件导入和参数文件导出。可选值为 `Degrees (°)` 与 `Radians (rad)`，默认值为 `Degrees (°)`。
 
 后端计算始终使用 radians。当前端选择 `Degrees (°)` 时，面板中的 `Phi=90` 会在发送给后端前转换为 `π/2 rad`；当前端选择 `Radians (rad)` 时，面板中的 `Phi=1.5708` 会直接作为弧度值发送给后端。
 
-导入 `.txt` 或 `.csv` 参数文件时，程序不会要求文件包含 `phase_unit` 字段，也不会根据数值大小自动猜测单位。导入的 `Phi` 数值始终按照当前 GUI 中选择的 `Phase unit` 解释。因此，若使用旧格式的弧度制参数文件，请先把 `Phase unit` 切换到 `Radians (rad)`，再执行导入。
+导入 `.txt` 或 `.csv` peak parameter file 时，程序不会要求文件包含 `phase_unit` 字段，也不会根据数值大小自动猜测单位。导入的 `Phi` 数值始终按照当前 GUI 中选择的 `Phase unit` 解释。因此，若使用旧格式的弧度制 peak parameter file，请先把 `Phase unit` 切换到 `Radians (rad)`，再执行导入。
 
 切换 `Degrees (°)` 与 `Radians (rad)` 时，当前面板中已有的全部 `Phi` 数值会自动换算，物理相位保持不变。例如 `90°` 切换到 radians 后显示约 `1.5708 rad`，再切回 degrees 后显示约 `90°`。
 
-导出参数文件时，`Phi` 会按照当前 GUI 选择的 `Phase unit` 输出；导出文件开头会写入类似 `# Phase unit: degrees` 或 `# Phase unit: radians` 的说明。
+导出 peak parameter file 时，`Phi` 会按照当前 GUI 选择的 `Phase unit` 输出；导出文件开头会写入类似 `# Phase unit: degrees` 或 `# Phase unit: radians` 的说明。
 
 ### 标签 3：MEM vs Fitting
 
-将 MEM 重建结果与用户提供的拟合参数生成的光谱进行对比。
+将 MEM 重建结果与用户提供的 peak parameters 生成的理想光谱进行对比。
+
+`Peak parameters` 指用于生成或比较 SFG 光谱的 Lorentzian/Voigt 峰参数。它们可以由用户手动输入、从文件导入，也可以来自拟合结果；如果确实特指拟合得到的参数，README 中使用 `fitted peak parameters` 表述。
 
 | 功能 | 说明 |
 |------|------|
 | Data Setup | 上传实验 CSV + 选择列 + 设置 NN 与 MEM calculation points |
-| Fitting Parameters | 输入/导入拟合参数（NR 实部/虚部 + 峰参数含相位），与 SFG Generator 格式一致；`Phase unit` 控制 Phi 的显示、导入和导出 |
-| 对比图 | MEM Re[χ]/Im[χ]（实线） vs Fitting Re[χ]/Im[χ]（虚线）叠绘 |
-| 误差相位滑块 | 拖动 φ 实时旋转 MEM 曲线 |
-| 差异曲线 | 实部/虚部各自的 Σ|diff| vs φ 图，当前相位位置用虚线游标标出 |
-| NRMSE 曲线 | Re-NRMSE 与 Im-NRMSE vs error phase 图，并标出各自最小值对应的 phase |
+| Peak Parameters | 输入/导入 peak parameters（NR 实部/虚部 + 峰参数含相位），与 SFG Generator 格式一致；`Phase unit` 控制 Phi 的显示、导入和导出 |
+| 对比图 | MEM Re[χ]/Im[χ]（实线） vs ideal Re[χ]/Im[χ] from peak parameters（虚线）叠绘 |
+| 误差相位滑块 | 以 degree 输入/选择 error phase，并实时旋转 MEM 曲线 |
+| NRMSE 曲线 | Re-NRMSE 与 Im-NRMSE vs error phase 图，并标出各自最小值和当前展示 phase |
 
 ## MEM Calculation Points / MEM 计算点数
 
@@ -210,11 +226,11 @@ GUI 使用步骤：
 - 通过插值增加 `N_MEM` 不等于增加实验信息。
 - 当前 GUI/API 限制 `N_MEM <= 20000`，过大的 `N_MEM` 会增加内存占用与计算时间。
 - `NN` 必须满足 `2 <= NN < N_MEM`。
-- 不同 `N_MEM` 下的 MEM 结果应通过 Re/Im residual、standard deviation 或其他定量指标比较，不能只凭曲线是否更平滑判断优劣。
+- 不同 `N_MEM` 下的 MEM 结果应优先通过 Re-NRMSE、Im-NRMSE 或其他明确的定量指标比较，不能只凭曲线是否更平滑判断优劣。
 
 ## NRMSE 误差评估与 Error Phase 优化
 
-`MEM vs Fitting` 页面会在 error phase 扫描中计算 NRMSE（Normalized Root Mean Square Error，归一化均方根误差），用于比较 MEM 重构的复谱与拟合参数生成的理想谱之间的相对误差，并辅助寻找更合适的 error phase。
+`MEM vs Fitting` 页面会在 error phase 扫描中计算 NRMSE。NRMSE = Normalized Root Mean Square Error（归一化均方根误差），用于比较 MEM 重构的复谱与 peak parameters 生成的理想谱之间的相对误差，并辅助寻找更合适的 error phase。NRMSE 是当前 GUI 推荐且默认使用的 error-phase optimization metric。
 
 程序分别计算 Re-NRMSE 与 Im-NRMSE，因为实部和虚部的幅度、背景、相位敏感性可能不同；两个分量的最佳 error phase 不一定完全相同。
 
@@ -257,7 +273,7 @@ NRMSE_Im(φ) = RMSE(r_Im(φ)) / RMS(Im_ideal)
 
 其中 `RMSE` 是残差的均方根，`RMS` 是对应理想谱分量的均方根幅度。NRMSE 是无量纲数值，越小表示 MEM 重构谱越接近理想谱。若理想 Re 或 Im 的 RMS 接近 0，程序会使用很小的 epsilon 作为归一化下限，避免除以零、NaN 或 Inf，并在结果区与导出文件中提示。
 
-不只使用绝对残差和的原因：
+旧的 absolute residual sum、MAE 或 residual standard deviation 不再作为 GUI 默认指标，也不再作为默认导出的 phase scan 指标。当前推荐使用 NRMSE 的原因：
 
 - 绝对残差和会受数据点数影响；
 - 绝对残差和会受整体谱强度影响；
@@ -266,9 +282,9 @@ NRMSE_Im(φ) = RMSE(r_Im(φ)) / RMS(Im_ideal)
 使用方法：
 
 1. 在 `MEM vs Fitting` 页面导入实验或模拟 CSV。
-2. 输入或导入拟合参数，运行 `Run MEM & Compare`。
-3. 程序会自动扫描 error phase，并显示原有的 `Σ|diff|` 曲线。
-4. 查看 `NRMSE for Error-Phase Optimization` 图中的 Re-NRMSE 和 Im-NRMSE 曲线。
+2. 输入或导入 peak parameters，运行 `Run MEM & Compare`。
+3. 程序会自动扫描 error phase，并显示 `NRMSE for Error-Phase Optimization` 图。
+4. 查看图中的 Re-NRMSE 和 Im-NRMSE 曲线。
 5. 读取结果区显示的 minimum Re-NRMSE、optimal phase for Re-NRMSE、minimum Im-NRMSE 和 optimal phase for Im-NRMSE。
 
 注意事项：
@@ -321,7 +337,7 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_ideal in select
 | `GET` | `/api/health` | 健康检查 |
 | `POST` | `/api/mem/run` | 上传 CSV → MEM 计算 |
 | `POST` | `/api/mem/phase` | 误差相位旋转 |
-| `POST` | `/api/mem/compare` | CSV + 拟合参数 → MEM 与拟合光谱对比 |
+| `POST` | `/api/mem/compare` | CSV + peak parameters → MEM 与 peak-parameter ideal spectrum 对比 |
 | `POST` | `/api/sfg/generate` | Lorentzian 参数 → SFG 光谱 |
 
 ### `POST /api/mem/run`
@@ -397,7 +413,7 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_ideal in select
 | `nn` | int | MEM NN（可选） |
 | `mem_points` | int | MEM 计算点数 `N_MEM`（可选，默认 `N_original`） |
 | `column` | int | 强度列索引（可选） |
-| `params_json` | string | JSON 格式的拟合参数（同 SFG Generator 格式，支持 Lorentzian/Voigt peak） |
+| `params_json` | string | JSON 格式的 peak parameters（同 SFG Generator 格式，支持 Lorentzian/Voigt peak） |
 
 响应：
 
@@ -440,12 +456,12 @@ frequency_original,intensity_original,frequency_mem,intensity_mem_input,Re_mem,I
 2800.0,0.0012,2800.0,0.0012,8.78283326e-03,-1.93211660e-02
 ```
 
-当 `N_original` 与 `N_MEM` 不同时，普通 CSV 表中无法让每一行同时一一对应原始谱和 MEM 结果；导出文件会使用空值补齐较短数组。MEM vs Fitting 的完整比较导出还包含 `fitting_intensity`、`Re_ideal_on_mem_grid`、`Im_ideal_on_mem_grid`、`Re_residual`、`Im_residual` 等列。
+当 `N_original` 与 `N_MEM` 不同时，普通 CSV 表中无法让每一行同时一一对应原始谱和 MEM 结果；导出文件会使用空值补齐较短数组。MEM vs Fitting 的完整比较导出还包含 `ideal_intensity_from_peak_parameters`、`Re_ideal_on_mem_grid`、`Im_ideal_on_mem_grid`、`Re_residual`、`Im_residual` 等列。
 
-MEM vs Fitting 的 phase scan 导出包含原有 residual 指标和 full-range NRMSE 列：
+MEM vs Fitting 的 phase scan 默认只导出 NRMSE 相关列：
 
 ```
-error_phase_deg,error_phase_rad,re_nrmse,im_nrmse,RealDiff,ImagDiff,re_absolute_error,im_absolute_error,re_residual_std,im_residual_std,re_nrmse_full,im_nrmse_full
+error_phase_deg,error_phase_rad,re_nrmse_full,im_nrmse_full
 ```
 
 导出 metadata 会记录当前默认展示的 phase：
@@ -467,13 +483,15 @@ window_start_cm-1,window_end_cm-1,window_points,re_nrmse_window,im_nrmse_window
 导出文件的参数记录中会注明：
 
 ```
+NRMSE = Normalized Root Mean Square Error
+NRMSE 中文名称：归一化均方根误差
 NRMSE normalization:
 RMSE divided by RMS amplitude of the corresponding ideal spectrum
 ```
 
 导出 metadata 还会记录完整光谱范围、用户设定的窗口范围、实际用于计算的有效窗口范围、full-range optimal phase 和 windowed optimal phase。
 
-SFG Generator 导出包含总谱与各子峰分量。SFG Generator 和 MEM vs Fitting 的参数导出文件会按当前 `Phase unit` 输出 `Phi`，并在文件注释中写明 `Phase unit: degrees` 或 `Phase unit: radians`。
+SFG Generator 导出包含总谱与各子峰分量。SFG Generator 和 MEM vs Fitting 的 peak parameter 导出文件会按当前 `Phase unit` 输出 `Phi`，并在文件注释中写明 `Phase unit: degrees` 或 `Phase unit: radians`。
 
 ## MEM 算法
 
@@ -498,7 +516,7 @@ SFG Generator 导出包含总谱与各子峰分量。SFG Generator 和 MEM vs Fi
 | `Gaussian_FWHM_q` | Voigt 峰的 Gaussian FWHM；Lorentzian 峰忽略该值 |
 | `φ_q` | 第 q 峰的相位（后端内部使用 rad；GUI 中 `Phi` 可由 `Phase unit` 选择 degrees 或 radians，默认 degrees） |
 
-Voigt 峰通过 Faddeeva function 计算 complex Voigt profile。强度 = |χ(ω)|²，实部 = Re[χ]，虚部 = Im[χ]。
+Voigt 峰通过 `scipy.special.wofz` 计算 Faddeeva function，并由此得到 complex Voigt response：`V_complex(ω) = i sqrt(pi) wofz(z) / (sigma sqrt(2))`。强度 = |χ(ω)|²，实部 = Re[χ]，虚部 = Im[χ]。
 
 ## 关联项目
 

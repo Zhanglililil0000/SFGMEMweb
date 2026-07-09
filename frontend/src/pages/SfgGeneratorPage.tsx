@@ -179,7 +179,7 @@ export default function SfgGeneratorPage() {
 
   const handleExportParams = () => {
     const lines = [
-      '# SFG parameters',
+      '# SFG peak parameters',
       `# Phase unit: ${phaseUnitName(phaseUnit)}`,
       `NR_Real=${formatParameterNumber(nrReal)}`,
       `NR_Imag=${formatParameterNumber(nrImag)}`,
@@ -199,10 +199,10 @@ export default function SfgGeneratorPage() {
     })
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = 'SFG_parameters.txt'
+    const a = document.createElement('a'); a.href = url; a.download = 'SFG_peak_parameters.txt'
     document.body.appendChild(a); a.click(); document.body.removeChild(a)
     URL.revokeObjectURL(url)
-    message.success(`Parameters exported (Phase unit: ${phaseUnitName(phaseUnit)})`)
+    message.success(`Peak parameters exported (Phase unit: ${phaseUnitName(phaseUnit)})`)
   }
 
   return (
@@ -226,9 +226,9 @@ export default function SfgGeneratorPage() {
             <Text strong>Peaks ({peaks.length})</Text>
             <Button size="small" icon={<PlusOutlined />} onClick={addPeak}>Add</Button>
             <Upload accept=".txt,.csv" maxCount={1} showUploadList={false} beforeUpload={handleImportParams}>
-              <Button size="small" icon={<UploadOutlined />}>Import</Button>
+              <Button size="small" icon={<UploadOutlined />}>Import peak parameters</Button>
             </Upload>
-            <Button size="small" icon={<DownloadOutlined />} onClick={handleExportParams}>Export Params</Button>
+            <Button size="small" icon={<DownloadOutlined />} onClick={handleExportParams}>Export peak parameters</Button>
           </Space>
           <Space wrap style={{ marginTop: 8 }}>
             <Text strong>Phase unit</Text>

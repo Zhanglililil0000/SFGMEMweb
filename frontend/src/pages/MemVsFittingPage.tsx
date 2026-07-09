@@ -127,6 +127,7 @@ function buildNrmseSeries(
   if (idealReRmsRaw < NRMSE_EPSILON) warnings.push(`${label} ideal Re RMS is near zero; Re-NRMSE used epsilon normalization.`)
   if (idealImRmsRaw < NRMSE_EPSILON) warnings.push(`${label} ideal Im RMS is near zero; Im-NRMSE used epsilon normalization.`)
 
+  // Legacy error metrics are kept internally but hidden from the GUI. NRMSE is the recommended metric.
   const diffReal: number[] = []
   const diffImag: number[] = []
   const reResidualStd: number[] = []
@@ -337,7 +338,6 @@ export default function MemVsFittingPage() {
   const [windowEdited, setWindowEdited] = useState(false)
 
   const comparisonRef = useRef<HTMLDivElement>(null)
-  const diffRef = useRef<HTMLDivElement>(null)
   const nrmseRef = useRef<HTMLDivElement>(null)
   const intensityRef = useRef<HTMLDivElement>(null)
 
@@ -428,9 +428,9 @@ export default function MemVsFittingPage() {
     const rot = currentRotated!
     const traces = [
       { x: w, y: safeArr(rot.real), type: 'scatter', mode: 'lines', name: 'MEM Re[chi]', line: { color: '#e74c3c', width: 2 } },
-      { x: w, y: safeArr(result.fitting_real), type: 'scatter', mode: 'lines', name: 'Fitting Re[chi]', line: { color: '#e74c3c', width: 1.5, dash: 'dash' } },
+      { x: w, y: safeArr(result.fitting_real), type: 'scatter', mode: 'lines', name: 'Ideal Re[chi] from peak parameters', line: { color: '#e74c3c', width: 1.5, dash: 'dash' } },
       { x: w, y: safeArr(rot.imag), type: 'scatter', mode: 'lines', name: 'MEM Im[chi]', line: { color: '#3498db', width: 2 } },
-      { x: w, y: safeArr(result.fitting_imag), type: 'scatter', mode: 'lines', name: 'Fitting Im[chi]', line: { color: '#3498db', width: 1.5, dash: 'dash' } },
+      { x: w, y: safeArr(result.fitting_imag), type: 'scatter', mode: 'lines', name: 'Ideal Im[chi] from peak parameters', line: { color: '#3498db', width: 1.5, dash: 'dash' } },
     ]
     Plotly.newPlot(comparisonRef.current, traces, {
       title: {
@@ -465,11 +465,11 @@ export default function MemVsFittingPage() {
       {
         x: memW, y: safeArr(result.fitting_intensity),
         type: 'scatter', mode: 'lines',
-        name: 'Fitting Generated Spectra',
+        name: 'Ideal spectrum from peak parameters',
         line: { color: '#8e44ad', width: 1.8, dash: 'dot' },
       },
     ], {
-      title: { text: 'Intensity Comparison: Import vs Fitting', font: { size: 14 } },
+      title: { text: 'Intensity Comparison: Import vs Peak-parameter Ideal', font: { size: 14 } },
       xaxis: { title: 'Wavenumber (cm<sup>-1</sup>)' },
       yaxis: { title: '|chi|^2' },
       hovermode: 'x',
@@ -477,44 +477,6 @@ export default function MemVsFittingPage() {
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
     }, chartConfig)
   }, [result])
-
-  useEffect(() => {
-    if (!result || !phaseScanData || 'alignmentError' in phaseScanData || !diffRef.current) return
-    const gd = diffRef.current
-    const pv = phaseScanData.phaseDeg
-    const allY = phaseScanData.diffReal.concat(phaseScanData.diffImag)
-    const yMax = Math.max(...allY) * 1.1 || 1
-    const traces: any[] = [
-      { x: pv, y: phaseScanData.diffReal, type: 'scatter', mode: 'lines', name: 'Real Part Diff', line: { color: '#e74c3c', width: 2 } },
-      { x: pv, y: phaseScanData.diffImag, type: 'scatter', mode: 'lines', name: 'Imaginary Part Diff', line: { color: '#3498db', width: 2 } },
-    ]
-    traces.push({
-      x: [selectedPhaseDeg, selectedPhaseDeg],
-      y: [0, yMax],
-      type: 'scatter', mode: 'lines',
-      name: 'Selected phase', line: { color: '#999', width: 1, dash: 'dash' },
-      showlegend: false,
-    })
-    Plotly.newPlot(gd, traces, {
-      title: { text: 'Error Phase Difference — click to set phase', font: { size: 14 } },
-      xaxis: { title: 'Error phase (\u00b0)', range: [Math.min(...pv), Math.max(...pv)] },
-      yaxis: { title: 'Sum |diff|' },
-      hovermode: 'x',
-      margin: { l: 60, r: 20, t: 50, b: 45 },
-      legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
-    }, chartConfig)
-    const onClick = (eventData: any) => {
-      if (eventData?.points?.[0]) {
-        const x = eventData.points[0].x as number
-        setPhaseAngle(degToRad(x))
-        setPhaseSelectionMode('manual')
-      }
-    }
-    ;(gd as any).on?.('plotly_click', onClick)
-    return () => {
-      ;(gd as any).removeAllListeners?.('plotly_click')
-    }
-  }, [phaseScanData, selectedPhaseDeg])
 
   useEffect(() => {
     if (!result || !phaseScanData || 'alignmentError' in phaseScanData || !nrmseRef.current) return
@@ -661,7 +623,7 @@ export default function MemVsFittingPage() {
         setPeaks(parsed.peaks)
         message.success(`Imported ${parsed.peaks.length} peak(s); Phi interpreted as ${phaseUnitName(phaseUnit)}`)
       } else {
-        message.warning('No valid parameters found')
+        message.warning('No valid peak parameters found')
       }
     }
     reader.readAsText(f)
@@ -670,7 +632,7 @@ export default function MemVsFittingPage() {
 
   const handleExportParams = () => {
     const lines = [
-      '# MEM vs Fitting parameters',
+      '# MEM vs Fitting peak parameters',
       `# Phase unit: ${phaseUnitName(phaseUnit)}`,
       `NR_Real=${formatParameterNumber(nrReal)}`,
       `NR_Imag=${formatParameterNumber(nrImag)}`,
@@ -690,10 +652,10 @@ export default function MemVsFittingPage() {
     })
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = 'Fitting_parameters.txt'
+    const a = document.createElement('a'); a.href = url; a.download = 'Peak_parameters.txt'
     document.body.appendChild(a); a.click(); document.body.removeChild(a)
     URL.revokeObjectURL(url)
-    message.success(`Parameters exported (Phase unit: ${phaseUnitName(phaseUnit)})`)
+    message.success(`Peak parameters exported (Phase unit: ${phaseUnitName(phaseUnit)})`)
   }
 
   const handleRun = async () => {
@@ -715,7 +677,6 @@ export default function MemVsFittingPage() {
       setPhaseSelectionMode('default')
       setPhaseAngle(0)
       if (comparisonRef.current) Plotly.purge(comparisonRef.current)
-      if (diffRef.current) Plotly.purge(diffRef.current)
       if (nrmseRef.current) Plotly.purge(nrmseRef.current)
       if (intensityRef.current) Plotly.purge(intensityRef.current)
     } catch (e: any) {
@@ -723,7 +684,7 @@ export default function MemVsFittingPage() {
     } finally { setTimeout(() => setLoading(false), 100) }
   }
 
-  const handleExportDiff = () => {
+  const handleExportNrmse = () => {
     if (!phaseScanData || 'alignmentError' in phaseScanData) return
     const lines = [
       '# N_original,' + cell(result?.n_original),
@@ -747,6 +708,8 @@ export default function MemVsFittingPage() {
       '# full_re_nrmse_min,' + cell(phaseScanData.reBest.value),
       '# full_im_nrmse_optimal_phase_deg,' + cell(phaseScanData.imBest.phaseDeg),
       '# full_im_nrmse_min,' + cell(phaseScanData.imBest.value),
+      '# NRMSE,Normalized Root Mean Square Error',
+      '# NRMSE Chinese name,归一化均方根误差',
       '# NRMSE normalization,RMSE divided by RMS amplitude of the corresponding ideal spectrum',
       '# NRMSE epsilon,' + NRMSE_EPSILON,
       '# ideal_re_rms,' + cell(phaseScanData.idealReRmsRaw),
@@ -767,14 +730,6 @@ export default function MemVsFittingPage() {
     const header = [
       'error_phase_deg',
       'error_phase_rad',
-      're_nrmse',
-      'im_nrmse',
-      'RealDiff',
-      'ImagDiff',
-      're_absolute_error',
-      'im_absolute_error',
-      're_residual_std',
-      'im_residual_std',
       're_nrmse_full',
       'im_nrmse_full',
     ]
@@ -789,19 +744,9 @@ export default function MemVsFittingPage() {
     }
     lines.push(header.join(','))
     for (let i = 0; i < phaseScanData.phaseRad.length; i++) {
-      const primaryReNrmse = phaseScanData.windowMetrics ? phaseScanData.windowMetrics.reNrmse[i] : phaseScanData.reNrmse[i]
-      const primaryImNrmse = phaseScanData.windowMetrics ? phaseScanData.windowMetrics.imNrmse[i] : phaseScanData.imNrmse[i]
       const row = [
         phaseScanData.phaseDeg[i].toFixed(6),
         phaseScanData.phaseRad[i].toFixed(8),
-        primaryReNrmse.toExponential(6),
-        primaryImNrmse.toExponential(6),
-        phaseScanData.diffReal[i].toExponential(6),
-        phaseScanData.diffImag[i].toExponential(6),
-        phaseScanData.diffReal[i].toExponential(6),
-        phaseScanData.diffImag[i].toExponential(6),
-        phaseScanData.reResidualStd[i].toExponential(6),
-        phaseScanData.imResidualStd[i].toExponential(6),
         phaseScanData.reNrmse[i].toExponential(6),
         phaseScanData.imNrmse[i].toExponential(6),
       ]
@@ -819,10 +764,10 @@ export default function MemVsFittingPage() {
     const csv = lines.join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = 'MEM_vs_Fitting_Diff.csv'
+    const a = document.createElement('a'); a.href = url; a.download = 'MEM_vs_Fitting_NRMSE.csv'
     document.body.appendChild(a); a.click(); document.body.removeChild(a)
     URL.revokeObjectURL(url)
-    message.success('Difference data exported')
+    message.success('NRMSE data exported')
   }
 
   const handleExportComparison = () => {
@@ -841,7 +786,7 @@ export default function MemVsFittingPage() {
       '# default_display_phase_rad,' + cell(defaultPhaseSelection?.phaseRad),
       '# default_display_criterion,' + cell(defaultPhaseSelection?.criterionKey),
       '# note,' + cell(result.resampling_note),
-      'frequency_original,intensity_original,frequency_mem,intensity_mem_input,fitting_intensity,Re_mem,Im_mem,Re_ideal_on_mem_grid,Im_ideal_on_mem_grid,Re_residual,Im_residual',
+      'frequency_original,intensity_original,frequency_mem,intensity_mem_input,ideal_intensity_from_peak_parameters,Re_mem,Im_mem,Re_ideal_on_mem_grid,Im_ideal_on_mem_grid,Re_residual,Im_residual',
     ]
     const rowCount = Math.max(result.original_wavenumbers.length, result.mem_wavenumbers.length)
     for (let i = 0; i < rowCount; i++) {
@@ -939,12 +884,12 @@ export default function MemVsFittingPage() {
         )}
       </Card>
 
-      <Card size="small" title="Fitting Parameters" style={{ marginTop: 12 }}>
+      <Card size="small" title="Peak Parameters" style={{ marginTop: 12 }}>
         <Space wrap style={{ marginBottom: 8 }}>
           <Upload accept=".txt,.csv" maxCount={1} showUploadList={false} beforeUpload={handleImportParams}>
-            <Button size="small" icon={<UploadOutlined />}>Import Params</Button>
+            <Button size="small" icon={<UploadOutlined />}>Import peak parameters</Button>
           </Upload>
-          <Button size="small" icon={<DownloadOutlined />} onClick={handleExportParams}>Export Params</Button>
+          <Button size="small" icon={<DownloadOutlined />} onClick={handleExportParams}>Export peak parameters</Button>
           <Text strong>Phase unit</Text>
           <Select
             size="small"
@@ -1027,7 +972,7 @@ export default function MemVsFittingPage() {
 
       {!hasResult && (
         <div style={{ padding: 60, textAlign: 'center', background: '#fff', borderRadius: 8, marginTop: 12 }}>
-          <Empty description="Upload a CSV and set fitting parameters, then click Run" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          <Empty description="Upload a CSV and set peak parameters, then click Run" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         </div>
       )}
 
@@ -1037,7 +982,7 @@ export default function MemVsFittingPage() {
             <div ref={intensityRef} style={{ width: '100%', minHeight: 350 }} />
           </Card>
 
-          <Card size="small" title="MEM and Fitting Re/Im" style={{ marginTop: 12 }}
+          <Card size="small" title="MEM and Ideal Re/Im" style={{ marginTop: 12 }}
             extra={<Button size="small" icon={<DownloadOutlined />} onClick={handleExportComparison}>Export Comparison CSV</Button>}>
             <div ref={comparisonRef} style={{ width: '100%', minHeight: 400 }} />
           </Card>
@@ -1141,16 +1086,19 @@ export default function MemVsFittingPage() {
             )}
           </Card>
 
-          <Card size="small" title="Error Phase Difference" style={{ marginTop: 12 }}
-            extra={<Button size="small" icon={<DownloadOutlined />} onClick={handleExportDiff} disabled={!phaseScanData || 'alignmentError' in phaseScanData}>Export CSV</Button>}>
-            <div ref={diffRef} style={{ width: '100%', minHeight: 350 }} />
-          </Card>
-
-          <Card size="small" title="NRMSE for Error-Phase Optimization" style={{ marginTop: 12 }}>
+          <Card
+            size="small"
+            title="NRMSE for Error-Phase Optimization"
+            style={{ marginTop: 12 }}
+            extra={<Button size="small" icon={<DownloadOutlined />} onClick={handleExportNrmse} disabled={!phaseScanData || 'alignmentError' in phaseScanData}>Export NRMSE CSV</Button>}
+          >
             {phaseScanData && 'alignmentError' in phaseScanData ? (
               <Alert type="error" message={phaseScanData.alignmentError} showIcon />
             ) : phaseScanData ? (
               <>
+                <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 8 }}>
+                  NRMSE = Normalized Root Mean Square Error（归一化均方根误差）
+                </Text>
                 <Row gutter={[12, 8]} align="middle" style={{ marginBottom: 8 }}>
                   <Col>
                     <Space>
