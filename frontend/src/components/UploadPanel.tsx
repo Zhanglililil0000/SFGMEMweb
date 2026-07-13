@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { Upload, Button, InputNumber, Select, Typography, Alert, message, Row, Col, Card } from 'antd'
 import { InboxOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import type { UploadFile } from 'antd/es/upload/interface'
@@ -22,7 +22,7 @@ function countCsvDataRows(text: string): number {
 }
 
 function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
-  const fileRef = useRef<File | null>(null)
+  const [file, setFile] = useState<File | null>(null)
   const [fileList, setFileList] = useState<UploadFile[]>([])
   const [columns, setColumns] = useState<ColumnInfo[]>([])
   const [selectedColumn, setSelectedColumn] = useState<number>(1)
@@ -59,14 +59,14 @@ function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
       message.success(`Parsed ${cols.length} columns, ${pointCount} points${isHeader ? ' (with header)' : ''}${keepManual}`)
     }
     reader.readAsText(file)
-    fileRef.current = file
+    setFile(file)
     setFileName(file.name)
     setFileList([{ uid: '-1', name: file.name, status: 'done' } as UploadFile])
     return false
   }
 
   const handleRemove = () => {
-    fileRef.current = null
+    setFile(null)
     setColumns([])
     setFileList([])
     setFileName('')
@@ -76,7 +76,7 @@ function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
   }
 
   const handleRun = () => {
-    if (!fileRef.current) {
+    if (!file) {
       message.warning('Please upload a CSV file first')
       return
     }
@@ -100,10 +100,10 @@ function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
       message.error(`NN must be an integer between 2 and N_MEM - 1 (${memPoints - 1})`)
       return
     }
-    onRun(fileRef.current, nn ?? undefined, memPoints, selectedColumn)
+    onRun(file, nn ?? undefined, memPoints, selectedColumn)
   }
 
-  const hasFile = fileRef.current !== null
+  const hasFile = file !== null
 
   return (
     <Card title="Data Setup" size="small">

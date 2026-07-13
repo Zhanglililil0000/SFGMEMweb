@@ -12,6 +12,11 @@ interface PhaseControlProps {
   wavenumbers: number[]
   realPart: number[]
   imagPart: number[]
+  referenceRealPart?: number[]
+  referenceImagPart?: number[]
+  referenceLabel?: string
+  reNrmse?: number
+  imNrmse?: number
   originalWavenumbers?: number[]
   originalIntensity?: number[]
   memInputIntensity?: number[]
@@ -39,6 +44,11 @@ const PhaseControl: React.FC<PhaseControlProps> = ({
   wavenumbers,
   realPart,
   imagPart,
+  referenceRealPart,
+  referenceImagPart,
+  referenceLabel,
+  reNrmse,
+  imNrmse,
   originalWavenumbers,
   originalIntensity,
   memInputIntensity,
@@ -61,6 +71,11 @@ const PhaseControl: React.FC<PhaseControlProps> = ({
           wavenumbers={wavenumbers}
           realPart={realPart}
           imagPart={imagPart}
+          referenceRealPart={referenceRealPart}
+          referenceImagPart={referenceImagPart}
+          referenceLabel={referenceLabel}
+          reNrmse={reNrmse}
+          imNrmse={imNrmse}
           originalWavenumbers={originalWavenumbers}
           originalIntensity={originalIntensity}
           memInputIntensity={memInputIntensity}

@@ -1,12 +1,15 @@
 import { useRef, useEffect } from 'react'
 import 'plotly.js/dist/plotly.min.js'
 
-const Plotly = (window as any).Plotly
+const Plotly = window.Plotly
 
 interface ComplexChartProps {
   wavenumbers: number[]
   realPart: number[]
   imagPart: number[]
+  referenceRealPart?: number[]
+  referenceImagPart?: number[]
+  referenceLabel?: string
 }
 
 const layout = {
@@ -31,11 +34,15 @@ const ComplexChart: React.FC<ComplexChartProps> = ({
   wavenumbers,
   realPart,
   imagPart,
+  referenceRealPart,
+  referenceImagPart,
+  referenceLabel = 'External reference',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!containerRef.current || wavenumbers.length === 0) return
+    const container = containerRef.current
+    if (!container || wavenumbers.length === 0) return
 
     function safeValues(arr: number[]): number[] {
       return arr.map((v) => (Number.isFinite(v) ? v : 0))
@@ -44,14 +51,13 @@ const ComplexChart: React.FC<ComplexChartProps> = ({
     const safeWavenumbers = safeValues(wavenumbers)
     const safeReal = safeValues(realPart)
     const safeImag = safeValues(imagPart)
-
-    Plotly.newPlot(containerRef.current, [
+    const traces: Array<Record<string, unknown>> = [
       {
         x: safeWavenumbers,
         y: safeReal,
         type: 'scatter',
         mode: 'lines',
-        name: 'Re[chi]',
+        name: 'MEM Re[chi]',
         line: { color: '#e74c3c', width: 2 },
       },
       {
@@ -59,17 +65,43 @@ const ComplexChart: React.FC<ComplexChartProps> = ({
         y: safeImag,
         type: 'scatter',
         mode: 'lines',
-        name: 'Im[chi]',
+        name: 'MEM Im[chi]',
         line: { color: '#3498db', width: 2 },
       },
-    ], layout, config)
+    ]
+
+    if (
+      referenceRealPart
+      && referenceImagPart
+      && referenceRealPart.length === wavenumbers.length
+      && referenceImagPart.length === wavenumbers.length
+    ) {
+      traces.push(
+        {
+          x: safeWavenumbers,
+          y: safeValues(referenceRealPart),
+          type: 'scatter',
+          mode: 'lines',
+          name: `${referenceLabel} Re[chi]`,
+          line: { color: '#e74c3c', width: 1.5, dash: 'dash' },
+        },
+        {
+          x: safeWavenumbers,
+          y: safeValues(referenceImagPart),
+          type: 'scatter',
+          mode: 'lines',
+          name: `${referenceLabel} Im[chi]`,
+          line: { color: '#3498db', width: 1.5, dash: 'dash' },
+        },
+      )
+    }
+
+    Plotly.newPlot(container, traces, layout, config)
 
     return () => {
-      if (containerRef.current) {
-        Plotly.purge(containerRef.current)
-      }
+      Plotly.purge(container)
     }
-  }, [wavenumbers, realPart, imagPart])
+  }, [wavenumbers, realPart, imagPart, referenceRealPart, referenceImagPart, referenceLabel])
 
   if (wavenumbers.length === 0) {
     return (

@@ -18,7 +18,7 @@ import {
 } from '../utils/phaseUnit'
 import { buildImportedPeak, importedPeakIndices, normalizeProfileType, profileTypeOptions } from '../utils/sfgPeakParams'
 
-const Plotly = (window as any).Plotly
+const Plotly = window.Plotly
 const { Text } = Typography
 
 const chartConfig = {
@@ -63,7 +63,7 @@ export default function SfgGeneratorPage() {
       subKey: 'intensity' | 'real' | 'imag',
       totalColor: string,
     ) {
-      const traces: any[] = []
+      const traces: PlotlyTrace[] = []
       if (sub && data.sub_components) {
         data.sub_components.forEach((comp, i) => {
           const y = Array.isArray(comp[subKey]) ? safeArr(comp[subKey]) : new Array(w.length).fill(comp[subKey])
@@ -111,7 +111,7 @@ export default function SfgGeneratorPage() {
       setResult(data)
       ;[intensityRef, realRef, imagRef].forEach((r) => { if (r.current) Plotly.purge(r.current) })
       setTimeout(() => drawCharts(data, showSubpeaks), 50)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(api.getApiErrorMessage(e))
     } finally { setLoading(false) }
   }
@@ -121,7 +121,7 @@ export default function SfgGeneratorPage() {
     const header = ['Wavenumber(cm-1)', 'Intensity', 'Real', 'Imag']  .concat(result.sub_components.flatMap((c) => [`${c.label}_Intensity`, `${c.label}_Real`, `${c.label}_Imag`]))
     const rows = result.wavenumbers.map((_, i) => [result.wavenumbers[i], result.intensity[i], result.real_part[i], result.imag_part[i]]
       .concat(result.sub_components.flatMap((c) => {
-        const ci = (v: any) => (Array.isArray(v) ? v[i] : v)
+        const ci = (v: number[] | number) => (Array.isArray(v) ? v[i] : v)
         return [ci(c.intensity), ci(c.real), ci(c.imag)]
       })))
     const csv = [header.join(','), ...rows.map((r) => r.map((v) => (typeof v === 'number' ? v.toExponential(6) : v)).join(','))].join('\n')
@@ -222,14 +222,18 @@ export default function SfgGeneratorPage() {
             <InputNumber addonBefore="NR Imag" value={nrImag} onChange={(v) => setNrImag(v ?? 0)} step={0.1} style={{ width: 130 }} />
           </Space>
           <Divider style={{ margin: '12px 0' }} />
-          <Space>
-            <Text strong>Peaks ({peaks.length})</Text>
-            <Button size="small" icon={<PlusOutlined />} onClick={addPeak}>Add</Button>
-            <Upload accept=".txt,.csv" maxCount={1} showUploadList={false} beforeUpload={handleImportParams}>
-              <Button size="small" icon={<UploadOutlined />}>Import peak parameters</Button>
-            </Upload>
-            <Button size="small" icon={<DownloadOutlined />} onClick={handleExportParams}>Export peak parameters</Button>
-          </Space>
+          <div>
+            <Text strong style={{ display: 'block', marginBottom: 6 }}>
+              Peaks ({peaks.length})
+            </Text>
+            <Space wrap size={[6, 6]} style={{ width: '100%' }}>
+              <Button size="small" icon={<PlusOutlined />} onClick={addPeak}>Add</Button>
+              <Upload accept=".txt,.csv" maxCount={1} showUploadList={false} beforeUpload={handleImportParams}>
+                <Button size="small" icon={<UploadOutlined />}>Import peak parameters</Button>
+              </Upload>
+              <Button size="small" icon={<DownloadOutlined />} onClick={handleExportParams}>Export peak parameters</Button>
+            </Space>
+          </div>
           <Space wrap style={{ marginTop: 8 }}>
             <Text strong>Phase unit</Text>
             <Select

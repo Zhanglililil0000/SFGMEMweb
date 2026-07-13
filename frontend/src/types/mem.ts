@@ -37,6 +37,7 @@ export interface ColumnInfo {
 }
 
 export interface SfgPeakParams {
+  label?: string
   amplitude: number
   center: number
   width: number

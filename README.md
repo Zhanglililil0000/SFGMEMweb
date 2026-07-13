@@ -1,6 +1,6 @@
 # MEM Analyzer Web
 
-基于最大熵法（MEM）的 Web 端和频光谱（SFG）分析平台。提供三个主要功能模块：MEM 光谱重建、SFG 光谱生成器、MEM 与拟合结果对比。
+基于最大熵法（MEM）的 Web 端和频光谱（SFG）分析平台。提供四个主要功能模块：MEM 光谱重建、SFG 光谱生成器、MEM 与拟合结果对比、Fitting Analysis。
 
 ## 项目架构
 
@@ -22,7 +22,8 @@ MEMweb/
 │   │   ├── pages/
 │   │   │   ├── MemAnalyzerPage.tsx   # 标签 1：MEM 光谱分析器
 │   │   │   ├── SfgGeneratorPage.tsx  # 标签 2：SFG 光谱生成器
-│   │   │   └── MemVsFittingPage.tsx  # 标签 3：MEM vs Fitting 对比
+│   │   │   ├── MemVsFittingPage.tsx  # 标签 3：MEM vs Fitting 对比
+│   │   │   └── FittingAnalysisPage.tsx # 标签 4：Fitting Analysis
 │   │   ├── components/
 │   │   │   ├── UploadPanel.tsx       # MEM 文件上传 & 参数设置
 │   │   │   ├── IntensityChart.tsx    # 强度谱图（Plotly.js）
@@ -95,8 +96,9 @@ cd backend && python main.py           # 访问 :8000
 |------|------|
 | Data Setup | 上传 CSV → 选择列 → 设置 NN 与 MEM calculation points → Run MEM |
 | 强度谱图 | 同图展示原始 |χ|² 与重采样/插值后的 MEM 输入谱 |
-| 复谱图 | Re[χ] 与 Im[χ] 曲线，随相位滑块实时旋转 |
-| 误差相位调节 | 滑块 0 ~ 2π + 精确数值输入 + Reset + 导出 CSV |
+| 复谱图 | Re[χ] 与 Im[χ] 曲线，随相位滑块实时旋转；可叠加外部 Re/Im reference 谱 |
+| External Re/Im Reference Spectrum | 可导入包含波数、Re、Im 的 CSV/TXT 参考谱；程序会自动识别默认列，也允许手动选择 Wavenumber/Re/Im 列，然后映射到 MEM 输出频率轴并计算当前 phase 下的 Re-NRMSE 与 Im-NRMSE |
+| 误差相位调节 | 滑块 0 ~ 360° + 精确数值输入 + Reset + 导出 CSV |
 
 ### 标签 2：SFG Generator
 
@@ -169,7 +171,7 @@ Intensity(ω) = |χ_NR + Σχ_q(ω)|^2
 
 ### Phase unit for Phi import/export / Phi 相位单位
 
-`SFG Generator` 和 `MEM vs Fitting` 的 peak parameter 面板使用统一的 `Phase unit` 控件控制 `Phi` 的显示、手动输入、参数文件导入和参数文件导出。可选值为 `Degrees (°)` 与 `Radians (rad)`，默认值为 `Degrees (°)`。
+`SFG Generator`、`MEM vs Fitting` 和 `Fitting Analysis` 的 peak parameter 面板使用统一的 `Phase unit` 控件控制 `Phi` 的显示、手动输入、参数文件导入和参数文件导出。可选值为 `Degrees (°)` 与 `Radians (rad)`，默认值为 `Degrees (°)`。
 
 后端计算始终使用 radians。当前端选择 `Degrees (°)` 时，面板中的 `Phi=90` 会在发送给后端前转换为 `π/2 rad`；当前端选择 `Radians (rad)` 时，面板中的 `Phi=1.5708` 会直接作为弧度值发送给后端。
 
@@ -181,7 +183,7 @@ Intensity(ω) = |χ_NR + Σχ_q(ω)|^2
 
 ### 标签 3：MEM vs Fitting
 
-将 MEM 重建结果与用户提供的 peak parameters 生成的理想光谱进行对比。
+将 MEM 重建结果与用户提供的 peak parameters 生成的理想光谱进行对比；也可以导入外部 Re/Im reference 谱作为对照。
 
 `Peak parameters` 指用于生成或比较 SFG 光谱的 Lorentzian/Voigt 峰参数。它们可以由用户手动输入、从文件导入，也可以来自拟合结果；如果确实特指拟合得到的参数，README 中使用 `fitted peak parameters` 表述。
 
@@ -189,9 +191,37 @@ Intensity(ω) = |χ_NR + Σχ_q(ω)|^2
 |------|------|
 | Data Setup | 上传实验 CSV + 选择列 + 设置 NN 与 MEM calculation points |
 | Peak Parameters | 输入/导入 peak parameters（NR 实部/虚部 + 峰参数含相位），与 SFG Generator 格式一致；`Phase unit` 控制 Phi 的显示、导入和导出 |
-| 对比图 | MEM Re[χ]/Im[χ]（实线） vs ideal Re[χ]/Im[χ] from peak parameters（虚线）叠绘 |
+| External Re/Im Reference Spectrum | 可导入包含波数、Re、Im 的 CSV/TXT 参考谱；程序会自动识别默认列，也允许手动选择 Wavenumber/Re/Im 列；有效时作为 Re/Im 对比图和 NRMSE 的 reference |
+| 对比图 | MEM Re[χ]/Im[χ]（实线） vs 当前 reference Re[χ]/Im[χ]（虚线）叠绘；reference 可来自 peak parameters 或外部 Re/Im 文件 |
 | 误差相位滑块 | 以 degree 输入/选择 error phase，并实时旋转 MEM 曲线 |
-| NRMSE 曲线 | Re-NRMSE 与 Im-NRMSE vs error phase 图，并标出各自最小值和当前展示 phase |
+| NRMSE 曲线 | 当前 reference 下的 Re-NRMSE 与 Im-NRMSE vs error phase 图，并标出各自最小值和当前展示 phase |
+
+### 标签 4：Fitting Analysis
+
+根据 fitted peak parameters 生成拟合复谱，并与 ideal reference 光谱进行对照。ideal reference 可以来自外部导入的 Re/Im 或 intensity 文件，也可以由独立的 ideal peak parameters 生成。该页面不运行 MEM，只复用当前 SFG/Lorentzian/Voigt 光谱生成逻辑来计算 fitted 与 ideal 的强度、Re[χ] 和 Im[χ]。
+
+| 功能 | 说明 |
+|------|------|
+| Frequency Axis | 设置 fitted 和 ideal spectrum 共用的起始波数、终止波数和点数 |
+| Fitted Peak Parameters | 输入/导入拟合得到或手动设置的 peak parameters（NR 实部/虚部 + 峰参数）；不显示 label 输入；`Phase unit` 控制 Phi 的显示、导入和导出 |
+| Ideal Peak Parameters | 输入/导入另一组 ideal peak parameters，用于生成理想 intensity、Re[χ] 和 Im[χ]；当没有外部 reference 文件时作为默认对照 |
+| Imported Reference Spectrum | 可导入一个同时包含波数、intensity、ideal Re、ideal Im 的 CSV/TXT；程序会自动识别默认列，也允许手动选择 Wavenumber/Intensity/Re/Im 列；导入后优先用于强度、Re/Im 对比和 NRMSE |
+| 对齐规则 | 外部导入的 Re/Im 或 intensity reference 会插值到 fitted spectrum 的频率轴；只有严格对齐到相同频率轴、相同点数和相同数组顺序后才计算 residual 和 NRMSE |
+| 图像 | Re comparison、Im comparison、intensity comparison 和 residual plot（含 zero baseline） |
+| 结果 | 显示 Re-NRMSE、Im-NRMSE、complex NRMSE、Intensity-NRMSE、比较点数、frequency range、phase unit、fitted/ideal peak count 和 reference 来源 |
+| CSV 导出 | 导出 fitted Re/Im/intensity、当前 reference Re/Im/intensity on fitted grid、residual、complex residual magnitude 与 metadata |
+
+Fitting Analysis 中的 NRMSE = Normalized Root Mean Square Error（归一化均方根误差）。定义为 fitted spectrum 与 ideal spectrum 的残差 RMSE 除以对应 ideal spectrum 的 RMS 幅度：
+
+```
+NRMSE_Re = RMSE(Re_fitted - Re_ideal) / RMS(Re_ideal)
+NRMSE_Im = RMSE(Im_fitted - Im_ideal) / RMS(Im_ideal)
+NRMSE_complex = sqrt(mean((Re_fitted - Re_ideal)^2 + (Im_fitted - Im_ideal)^2))
+                / sqrt(mean(Re_ideal^2 + Im_ideal^2))
+NRMSE_intensity = RMSE(Intensity_fitted - Intensity_reference) / RMS(Intensity_reference)
+```
+
+NRMSE 是无量纲数值，越小表示 fitted spectrum 越接近当前 reference。不要将 NRMSE 称为 standard deviation。若 reference Re、reference Im、reference complex 或 reference intensity 的 RMS 接近 0，程序会使用 epsilon 保护，避免除以零、NaN 或 Inf。
 
 ## MEM Calculation Points / MEM 计算点数
 
@@ -230,7 +260,12 @@ GUI 使用步骤：
 
 ## NRMSE 误差评估与 Error Phase 优化
 
-`MEM vs Fitting` 页面会在 error phase 扫描中计算 NRMSE。NRMSE = Normalized Root Mean Square Error（归一化均方根误差），用于比较 MEM 重构的复谱与 peak parameters 生成的理想谱之间的相对误差，并辅助寻找更合适的 error phase。NRMSE 是当前 GUI 推荐且默认使用的 error-phase optimization metric。
+`MEM vs Fitting` 页面会在 error phase 扫描中计算 NRMSE。NRMSE = Normalized Root Mean Square Error（归一化均方根误差），用于比较 MEM 重构的复谱与当前 reference 谱之间的相对误差，并辅助寻找更合适的 error phase。NRMSE 是当前 GUI 推荐且默认使用的 error-phase optimization metric。
+
+当前 reference 可以有两种来源：
+
+- `Peak-parameter ideal spectrum`：由 peak parameters 在 MEM 输出频率轴上生成的 ideal Re/Im 谱，这是默认 reference。
+- `External Re/Im reference`：用户导入的包含波数、Re、Im 的参考谱。程序会先自动识别默认列，用户也可以在 GUI 中手动指定 Wavenumber、Re 和 Im 分别来自哪一列；随后程序将其插值到 MEM 输出频率轴。只有频率范围覆盖当前 MEM 网格时，它才会替代 peak-parameter ideal 谱用于 Re/Im 对比和 NRMSE。
 
 程序分别计算 Re-NRMSE 与 Im-NRMSE，因为实部和虚部的幅度、背景、相位敏感性可能不同；两个分量的最佳 error phase 不一定完全相同。
 
@@ -260,18 +295,18 @@ phi_rad = phi_deg * pi / 180
 对每一个 error phase `φ`，先计算残差：
 
 ```
-r_Re,i(φ) = Re_MEM,i(φ) - Re_ideal,i
-r_Im,i(φ) = Im_MEM,i(φ) - Im_ideal,i
+r_Re,i(φ) = Re_MEM,i(φ) - Re_reference,i
+r_Im,i(φ) = Im_MEM,i(φ) - Im_reference,i
 ```
 
 再计算对应分量的 NRMSE：
 
 ```
-NRMSE_Re(φ) = RMSE(r_Re(φ)) / RMS(Re_ideal)
-NRMSE_Im(φ) = RMSE(r_Im(φ)) / RMS(Im_ideal)
+NRMSE_Re(φ) = RMSE(r_Re(φ)) / RMS(Re_reference)
+NRMSE_Im(φ) = RMSE(r_Im(φ)) / RMS(Im_reference)
 ```
 
-其中 `RMSE` 是残差的均方根，`RMS` 是对应理想谱分量的均方根幅度。NRMSE 是无量纲数值，越小表示 MEM 重构谱越接近理想谱。若理想 Re 或 Im 的 RMS 接近 0，程序会使用很小的 epsilon 作为归一化下限，避免除以零、NaN 或 Inf，并在结果区与导出文件中提示。
+其中 `RMSE` 是残差的均方根，`RMS` 是对应 reference 谱分量的均方根幅度。NRMSE 是无量纲数值，越小表示 MEM 重构谱越接近当前 reference。若 reference Re 或 Im 的 RMS 接近 0，程序会使用很小的 epsilon 作为归一化下限，避免除以零、NaN 或 Inf，并在结果区与导出文件中提示。
 
 旧的 absolute residual sum、MAE 或 residual standard deviation 不再作为 GUI 默认指标，也不再作为默认导出的 phase scan 指标。当前推荐使用 NRMSE 的原因：
 
@@ -282,21 +317,22 @@ NRMSE_Im(φ) = RMSE(r_Im(φ)) / RMS(Im_ideal)
 使用方法：
 
 1. 在 `MEM vs Fitting` 页面导入实验或模拟 CSV。
-2. 输入或导入 peak parameters，运行 `Run MEM & Compare`。
-3. 程序会自动扫描 error phase，并显示 `NRMSE for Error-Phase Optimization` 图。
-4. 查看图中的 Re-NRMSE 和 Im-NRMSE 曲线。
-5. 读取结果区显示的 minimum Re-NRMSE、optimal phase for Re-NRMSE、minimum Im-NRMSE 和 optimal phase for Im-NRMSE。
+2. 输入或导入 peak parameters；如需使用外部 reference，则在 `External Re/Im Reference Spectrum` 区域导入参考谱文件，并确认或修改 Wavenumber/Re/Im 列选择。
+3. 运行 `Run MEM & Compare`。
+4. 程序会自动扫描 error phase，并显示 `NRMSE for Error-Phase Optimization` 图。
+5. 查看图中的 Re-NRMSE 和 Im-NRMSE 曲线。
+6. 读取结果区显示的 minimum Re-NRMSE、optimal phase for Re-NRMSE、minimum Im-NRMSE 和 optimal phase for Im-NRMSE。
 
 注意事项：
 
 - Re 和 Im 的最佳 error phase 不一定完全相同。
-- NRMSE 越小，表示 MEM 重构与理想谱越接近。
+- NRMSE 越小，表示 MEM 重构与当前 reference 越接近。
 - 不应只根据谱线是否平滑判断 MEM 重构质量。
-- NRMSE 只在 MEM Re/Im 与 ideal Re/Im 已严格对齐到相同频率轴、相同点数、相同数组顺序时计算。
+- NRMSE 只在 MEM Re/Im 与 reference Re/Im 已严格对齐到相同频率轴、相同点数、相同数组顺序时计算。
 
 ### Selected spectral window NRMSE / 分段 NRMSE
 
-除了 full-range NRMSE，`MEM vs Fitting` 页面还支持 selected spectral window NRMSE（分段 NRMSE）。该功能只使用用户指定波数区间内的数据点，用于评价某个局部谱段中 MEM 重构谱与理想谱的匹配程度。
+除了 full-range NRMSE，`MEM vs Fitting` 页面还支持 selected spectral window NRMSE（分段 NRMSE）。该功能只使用用户指定波数区间内的数据点，用于评价某个局部谱段中 MEM 重构谱与当前 reference 谱的匹配程度。
 
 Full-range NRMSE 与 selected-window NRMSE 的区别：
 
@@ -309,8 +345,8 @@ Full-range NRMSE 与 selected-window NRMSE 的区别：
 对于窗口 `[ω_min, ω_max]`，程序只使用满足 `ω_min <= ω_i <= ω_max` 的数据点计算 NRMSE：
 
 ```
-NRMSE_Re,window(φ) = RMSE(r_Re(φ) in selected window) / RMS(Re_ideal in selected window)
-NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_ideal in selected window)
+NRMSE_Re,window(φ) = RMSE(r_Re(φ) in selected window) / RMS(Re_reference in selected window)
+NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_reference in selected window)
 ```
 
 窗口点由实际波数值筛选，不按数组索引或固定百分比截取。若用户输入的窗口超出光谱范围，程序会使用与当前光谱范围的有效交集，并显示实际使用的起止波数和窗口点数。窗口必须至少包含 3 个数据点。
@@ -328,7 +364,7 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_ideal in select
 - 分段 NRMSE 只评价选定区间。
 - 局部 NRMSE 很小并不代表整条谱都恢复良好。
 - 应结合 full-range NRMSE、分段 NRMSE、残差谱和 Re/Im 谱形共同判断 MEM 恢复质量。
-- 若窗口内 ideal Re 或 Im 的 RMS 接近 0，程序同样使用 epsilon 作为归一化下限并显示提示。
+- 若窗口内 reference Re 或 Im 的 RMS 接近 0，程序同样使用 epsilon 作为归一化下限并显示提示。
 
 ## API 接口
 
@@ -339,6 +375,8 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_ideal in select
 | `POST` | `/api/mem/phase` | 误差相位旋转 |
 | `POST` | `/api/mem/compare` | CSV + peak parameters → MEM 与 peak-parameter ideal spectrum 对比 |
 | `POST` | `/api/sfg/generate` | Lorentzian 参数 → SFG 光谱 |
+
+外部 Re/Im reference 谱目前在前端导入、对齐和计算 NRMSE，不改变 `/api/mem/run` 或 `/api/mem/compare` 的后端物理计算定义。
 
 ### `POST /api/mem/run`
 
@@ -441,6 +479,24 @@ WN,Int
 
 支持带/不带表头。第一列为波数。数据自动按波数升序排列。
 
+**外部 Re/Im reference 输入** — MEM Analyzer 与 MEM vs Fitting 均支持灵活列选择：
+
+```
+Wavenumber,Re,Im
+2800.0,0.012,-0.004
+2800.5,0.013,-0.0038
+...
+```
+
+也可以使用空格、Tab 或分号分隔，且波数、Re、Im 不必固定在前三列。导入后 GUI 会显示文件中的全部列，并给出自动识别的默认选择：
+
+- Wavenumber 列优先识别 `wavenumber`、`frequency`、`omega`、`wn`、`cm-1` 等列名。
+- Re 列优先识别 `Re`、`real`、`Re_Chi` 等列名。
+- Im 列优先识别 `Im`、`imag`、`Im_Chi` 等列名。
+- 如果没有表头或无法识别，默认预选前三个不同列；用户可以在下拉框中手动改选，再点击 `Apply selected columns`。
+
+导入后不会修改 MEM 输出谱，程序只把用户选择的 reference Re/Im 插值到 MEM 输出频率轴用于叠图、residual 和 NRMSE 计算。外部 reference 的频率范围必须覆盖当前 MEM 输出范围；否则该 reference 不会用于 NRMSE。
+
 **输出** — MEM Analyzer 导出格式：
 
 ```
@@ -456,7 +512,37 @@ frequency_original,intensity_original,frequency_mem,intensity_mem_input,Re_mem,I
 2800.0,0.0012,2800.0,0.0012,8.78283326e-03,-1.93211660e-02
 ```
 
-当 `N_original` 与 `N_MEM` 不同时，普通 CSV 表中无法让每一行同时一一对应原始谱和 MEM 结果；导出文件会使用空值补齐较短数组。MEM vs Fitting 的完整比较导出还包含 `ideal_intensity_from_peak_parameters`、`Re_ideal_on_mem_grid`、`Im_ideal_on_mem_grid`、`Re_residual`、`Im_residual` 等列。
+当 `N_original` 与 `N_MEM` 不同时，普通 CSV 表中无法让每一行同时一一对应原始谱和 MEM 结果；导出文件会使用空值补齐较短数组。若 MEM Analyzer 已导入外部 Re/Im reference，导出文件还会包含 `Re_reference_on_mem_grid`、`Im_reference_on_mem_grid`、`Re_residual`、`Im_residual` 以及当前 phase 下的 `Re_NRMSE`、`Im_NRMSE` metadata。
+
+MEM vs Fitting 的完整比较导出包含：
+
+```
+reference_intensity_on_mem_grid
+Re_reference_on_mem_grid
+Im_reference_on_mem_grid
+Re_residual
+Im_residual
+```
+
+其中 reference 可能来自 peak parameters 生成的 ideal 谱，也可能来自外部 Re/Im reference 文件；导出 metadata 会记录 `reference_source`、`reference_label` 和 `reference_alignment_method`。
+
+Fitting Analysis 的结果导出包含：
+
+```
+frequency
+Re_fitted
+Im_fitted
+Re_reference_on_fitted_grid
+Im_reference_on_fitted_grid
+Re_residual
+Im_residual
+intensity_fitted
+intensity_reference_on_fitted_grid
+intensity_residual
+complex_residual_magnitude
+```
+
+导出 metadata 会记录 `Re_NRMSE`、`Im_NRMSE`、`complex_NRMSE`、`intensity_NRMSE`、frequency range、number of points、fitted peak parameters、ideal peak parameters、phase unit、Re/Im reference source、intensity reference source 以及外部 reference 是否被插值到 fitted grid。
 
 MEM vs Fitting 的 phase scan 默认只导出 NRMSE 相关列：
 
@@ -486,7 +572,7 @@ window_start_cm-1,window_end_cm-1,window_points,re_nrmse_window,im_nrmse_window
 NRMSE = Normalized Root Mean Square Error
 NRMSE 中文名称：归一化均方根误差
 NRMSE normalization:
-RMSE divided by RMS amplitude of the corresponding ideal spectrum
+RMSE divided by RMS amplitude of the corresponding reference spectrum
 ```
 
 导出 metadata 还会记录完整光谱范围、用户设定的窗口范围、实际用于计算的有效窗口范围、full-range optimal phase 和 windowed optimal phase。

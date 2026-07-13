@@ -37,7 +37,7 @@ function stringField(fields: Record<string, string>, keys: string[], fallback: s
 export function importedPeakIndices(fields: Record<string, string>): number[] {
   const indices = new Set<number>()
   for (const key of Object.keys(fields)) {
-    const match = key.match(/^(A|Omega|Gamma|Phi|Profile|Profile_Type|Gaussian_FWHM|GaussianFWHM|Lorentzian_FWHM)(\d+)$/i)
+    const match = key.match(/^(A|Omega|Gamma|Phi|Profile|Profile_Type|Gaussian_FWHM|GaussianFWHM|Lorentzian_FWHM|Label|Mode|ModeName)(\d+)$/i)
     if (match) indices.add(Number(match[2]))
   }
   return Array.from(indices).sort((a, b) => a - b)
@@ -58,6 +58,7 @@ export function buildImportedPeak(
   )
 
   return {
+    label: stringField(fields, [`Label${suffix}`, `Mode${suffix}`, `ModeName${suffix}`, `mode_name${suffix}`], ''),
     profile_type: normalizeProfileType(stringField(fields, [`Profile${suffix}`, `Profile_Type${suffix}`, `profile_type${suffix}`], 'lorentzian')),
     amplitude: numberField(fields, [`A${suffix}`, `Amplitude${suffix}`, `amplitude${suffix}`], 1.0),
     center: numberField(fields, [`Omega${suffix}`, `Center${suffix}`, `center_cm-1${suffix}`, `center${suffix}`], defaultCenter),

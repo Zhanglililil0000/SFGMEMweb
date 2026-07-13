@@ -3,6 +3,7 @@ import { Layout, Typography, Tabs } from 'antd'
 import MemAnalyzerPage from './pages/MemAnalyzerPage'
 import MemVsFittingPage from './pages/MemVsFittingPage'
 import SfgGeneratorPage from './pages/SfgGeneratorPage'
+import FittingAnalysisPage from './pages/FittingAnalysisPage'
 
 const { Header, Content } = Layout
 const { Text } = Typography
@@ -11,6 +12,7 @@ const tabItems = [
   { key: 'mem', label: 'MEM Analyzer' },
   { key: 'sfg', label: 'SFG Generator' },
   { key: 'fitting', label: 'MEM vs Fitting' },
+  { key: 'fitting-analysis', label: 'Fitting Analysis' },
 ]
 
 function App() {
@@ -59,6 +61,7 @@ function App() {
         {activeTab === 'mem' && <MemAnalyzerPage />}
         {activeTab === 'fitting' && <MemVsFittingPage />}
         {activeTab === 'sfg' && <SfgGeneratorPage />}
+        {activeTab === 'fitting-analysis' && <FittingAnalysisPage />}
       </Content>
     </Layout>
   )

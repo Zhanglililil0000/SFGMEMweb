@@ -22,8 +22,18 @@ import {
   type PhaseUnit,
 } from '../utils/phaseUnit'
 import { buildImportedPeak, importedPeakIndices, normalizeProfileType, profileTypeOptions } from '../utils/sfgPeakParams'
+import {
+  NRMSE_EPSILON,
+  alignReferenceToGrid,
+  autoDetectReferenceColumns,
+  buildReferenceSpectrumFromTable,
+  parseReferenceTable,
+  type ReferenceColumnSelection,
+  type ReferenceSpectrum,
+  type ReferenceTable,
+} from '../utils/referenceSpectrum'
 
-const Plotly = (window as any).Plotly
+const Plotly = window.Plotly
 const { Text } = Typography
 
 const DEFAULT_PHASE_SCAN_START_DEG = 0
@@ -31,7 +41,6 @@ const DEFAULT_PHASE_SCAN_END_DEG = 360
 const DEFAULT_PHASE_SCAN_STEP_DEG = 0.5
 const MAX_PHASE_SCAN_POINTS = 5000
 const MAX_MEM_CALCULATION_POINTS = 20000
-const NRMSE_EPSILON = 1e-12
 
 const chartConfig = {
   displayModeBar: true,
@@ -111,21 +120,33 @@ function rms(values: number[]): number {
   return Math.sqrt(sumSq / values.length)
 }
 
+interface ComparisonReference {
+  source: 'peak_parameters' | 'external_reference'
+  label: string
+  real: number[]
+  imag: number[]
+  intensity: number[]
+  alignmentMethod: string
+  originalPointCount?: number
+  originalFrequencyRange?: [number, number]
+}
+
 function buildNrmseSeries(
   result: MemCompareResult,
+  reference: ComparisonReference,
   phaseValues: number[],
   pointIndices: number[],
   label: string,
 ) {
-  const idealRe = pointIndices.map((index) => result.fitting_real[index])
-  const idealIm = pointIndices.map((index) => result.fitting_imag[index])
-  const idealReRmsRaw = rms(idealRe)
-  const idealImRmsRaw = rms(idealIm)
-  const idealReRms = Math.max(idealReRmsRaw, NRMSE_EPSILON)
-  const idealImRms = Math.max(idealImRmsRaw, NRMSE_EPSILON)
+  const referenceRe = pointIndices.map((index) => reference.real[index])
+  const referenceIm = pointIndices.map((index) => reference.imag[index])
+  const referenceReRmsRaw = rms(referenceRe)
+  const referenceImRmsRaw = rms(referenceIm)
+  const referenceReRms = Math.max(referenceReRmsRaw, NRMSE_EPSILON)
+  const referenceImRms = Math.max(referenceImRmsRaw, NRMSE_EPSILON)
   const warnings: string[] = []
-  if (idealReRmsRaw < NRMSE_EPSILON) warnings.push(`${label} ideal Re RMS is near zero; Re-NRMSE used epsilon normalization.`)
-  if (idealImRmsRaw < NRMSE_EPSILON) warnings.push(`${label} ideal Im RMS is near zero; Im-NRMSE used epsilon normalization.`)
+  if (referenceReRmsRaw < NRMSE_EPSILON) warnings.push(`${label} reference Re RMS is near zero; Re-NRMSE used epsilon normalization.`)
+  if (referenceImRmsRaw < NRMSE_EPSILON) warnings.push(`${label} reference Im RMS is near zero; Im-NRMSE used epsilon normalization.`)
 
   // Legacy error metrics are kept internally but hidden from the GUI. NRMSE is the recommended metric.
   const diffReal: number[] = []
@@ -148,8 +169,8 @@ function buildNrmseSeries(
     for (const i of pointIndices) {
       const rotatedReal = result.mem_real[i] * cosA - result.mem_imag[i] * sinA
       const rotatedImag = result.mem_real[i] * sinA + result.mem_imag[i] * cosA
-      const residualReal = rotatedReal - result.fitting_real[i]
-      const residualImag = rotatedImag - result.fitting_imag[i]
+      const residualReal = rotatedReal - reference.real[i]
+      const residualImag = rotatedImag - reference.imag[i]
       sumAbsR += Math.abs(residualReal)
       sumAbsI += Math.abs(residualImag)
       sumR += residualReal
@@ -168,8 +189,8 @@ function buildNrmseSeries(
     diffImag.push(sumAbsI)
     reResidualStd.push(Math.sqrt(Math.max(meanSqR - meanR * meanR, 0)))
     imResidualStd.push(Math.sqrt(Math.max(meanSqI - meanI * meanI, 0)))
-    reNrmse.push(Math.sqrt(meanSqR) / idealReRms)
-    imNrmse.push(Math.sqrt(meanSqI) / idealImRms)
+    reNrmse.push(Math.sqrt(meanSqR) / referenceReRms)
+    imNrmse.push(Math.sqrt(meanSqI) / referenceImRms)
   }
 
   const phaseDeg = phaseValues.map(radToDeg)
@@ -183,8 +204,8 @@ function buildNrmseSeries(
     imResidualStd,
     reNrmse,
     imNrmse,
-    idealReRmsRaw,
-    idealImRmsRaw,
+    idealReRmsRaw: referenceReRmsRaw,
+    idealImRmsRaw: referenceImRmsRaw,
     warnings,
     pointCount: pointIndices.length,
     reBest: {
@@ -204,27 +225,28 @@ function buildNrmseSeries(
 
 function buildPhaseScanData(
   result: MemCompareResult,
+  reference: ComparisonReference,
   phaseValues: number[],
   windowOptions?: { enabled: boolean; start: number | null; end: number | null },
 ) {
   const n = result.mem_real.length
   const aligned = n > 0
     && result.mem_imag.length === n
-    && result.fitting_real.length === n
-    && result.fitting_imag.length === n
+    && reference.real.length === n
+    && reference.imag.length === n
     && result.wavenumbers.length === n
     && result.mem_wavenumbers.length === n
     && result.wavenumbers.every((value, index) => Math.abs(value - result.mem_wavenumbers[index]) < 1e-9)
 
   if (!aligned) {
     return {
-      alignmentError: 'MEM and ideal Re/Im arrays are not on the same frequency grid; phase scan metrics were not calculated.',
+      alignmentError: 'MEM and reference Re/Im arrays are not on the same frequency grid; phase scan metrics were not calculated.',
     }
   }
 
   const phaseDeg = phaseValues.map(radToDeg)
   const fullPointIndices = result.wavenumbers.map((_, index) => index)
-  const fullMetrics = buildNrmseSeries(result, phaseValues, fullPointIndices, 'Full range')
+  const fullMetrics = buildNrmseSeries(result, reference, phaseValues, fullPointIndices, 'Full range')
   const spectrumStart = Math.min(...result.wavenumbers)
   const spectrumEnd = Math.max(...result.wavenumbers)
 
@@ -259,7 +281,7 @@ function buildPhaseScanData(
         if (windowPointIndices.length < 3) {
           windowError = 'Selected window must contain at least 3 data points.'
         } else {
-          windowMetrics = buildNrmseSeries(result, phaseValues, windowPointIndices, 'Selected window')
+          windowMetrics = buildNrmseSeries(result, reference, phaseValues, windowPointIndices, 'Selected window')
           windowInfo = {
             requestedStart,
             requestedEnd,
@@ -275,6 +297,9 @@ function buildPhaseScanData(
   return {
     phaseRad: phaseValues,
     phaseDeg,
+    referenceSource: reference.source,
+    referenceLabel: reference.label,
+    referenceAlignmentMethod: reference.alignmentMethod,
     fullRange: [spectrumStart, spectrumEnd] as [number, number],
     diffReal: fullMetrics.diffReal,
     diffImag: fullMetrics.diffImag,
@@ -326,6 +351,10 @@ export default function MemVsFittingPage() {
   const [nrImag, setNrImag] = useState(0.0)
   const [peaks, setPeaks] = useState<SfgPeakParams[]>([])
   const [phaseUnit, setPhaseUnit] = useState<PhaseUnit>('degrees')
+  const [externalReferenceTable, setExternalReferenceTable] = useState<ReferenceTable | null>(null)
+  const [externalReferenceSelection, setExternalReferenceSelection] = useState<ReferenceColumnSelection | null>(null)
+  const [externalReference, setExternalReference] = useState<ReferenceSpectrum | null>(null)
+  const [externalReferenceError, setExternalReferenceError] = useState<string | null>(null)
 
   const [phaseAngle, setPhaseAngle] = useState(0)
   const [phaseSelectionMode, setPhaseSelectionMode] = useState<'default' | 'manual'>('default')
@@ -347,23 +376,49 @@ export default function MemVsFittingPage() {
 
   const phaseValues = phaseScanConfig.phaseValues
 
+  const externalReferenceColumnOptions = externalReferenceTable?.columns.map((column) => ({
+    value: column.index,
+    label: `${column.index}: ${column.name}`,
+  })) ?? []
+
+  const alignedExternalReference = useMemo(() => {
+    if (!result || !externalReference) return null
+    return alignReferenceToGrid(externalReference, result.wavenumbers)
+  }, [result, externalReference])
+
+  const activeReference = useMemo<ComparisonReference | null>(() => {
+    if (!result) return null
+    if (alignedExternalReference?.aligned) {
+      const aligned = alignedExternalReference.aligned
+      return {
+        source: 'external_reference',
+        label: `External Re/Im reference: ${aligned.name}`,
+        real: aligned.real,
+        imag: aligned.imag,
+        intensity: aligned.intensity,
+        alignmentMethod: aligned.method,
+        originalPointCount: aligned.originalPointCount,
+        originalFrequencyRange: aligned.originalFrequencyRange,
+      }
+    }
+    return {
+      source: 'peak_parameters',
+      label: 'Peak-parameter ideal spectrum',
+      real: result.fitting_real,
+      imag: result.fitting_imag,
+      intensity: result.fitting_intensity,
+      alignmentMethod: 'Generated directly on the MEM output grid',
+    }
+  }, [result, alignedExternalReference])
+
   const phaseScanData = useMemo(() => {
-    if (!result || phaseValues.length === 0) return null
-    return buildPhaseScanData(result, phaseValues, {
+    if (!result || !activeReference || phaseValues.length === 0) return null
+    return buildPhaseScanData(result, activeReference, phaseValues, {
       enabled: windowNrmseEnabled,
       start: windowStart,
       end: windowEnd,
     })
-  }, [result, phaseValues, windowNrmseEnabled, windowStart, windowEnd])
-
-  useEffect(() => {
-    if (!result) return
-    if (!windowEdited || windowStart == null || windowEnd == null) {
-      setWindowStart(result.mem_frequency_range[0])
-      setWindowEnd(result.mem_frequency_range[1])
-      setWindowEdited(false)
-    }
-  }, [result, windowEdited, windowStart, windowEnd])
+  }, [result, activeReference, phaseValues, windowNrmseEnabled, windowStart, windowEnd])
 
   const defaultPhaseSelection = useMemo(() => {
     if (!phaseScanData || 'alignmentError' in phaseScanData) return null
@@ -393,12 +448,10 @@ export default function MemVsFittingPage() {
     }
   }, [phaseScanData, windowNrmseEnabled])
 
-  useEffect(() => {
-    if (phaseSelectionMode !== 'default' || !defaultPhaseSelection) return
-    setPhaseAngle(defaultPhaseSelection.phaseRad)
-  }, [phaseSelectionMode, defaultPhaseSelection?.phaseRad])
-
-  const selectedPhaseDeg = radToDeg(phaseAngle)
+  const displayedPhaseAngle = phaseSelectionMode === 'default' && defaultPhaseSelection
+    ? defaultPhaseSelection.phaseRad
+    : phaseAngle
+  const selectedPhaseDeg = radToDeg(displayedPhaseAngle)
   const phaseSliderMinDeg = phaseScanStartDeg != null && phaseScanEndDeg != null && phaseScanStartDeg < phaseScanEndDeg
     ? phaseScanStartDeg
     : DEFAULT_PHASE_SCAN_START_DEG
@@ -411,8 +464,8 @@ export default function MemVsFittingPage() {
 
   const currentRotated = useMemo(() => {
     if (!result) return null
-    const cosA = Math.cos(phaseAngle)
-    const sinA = Math.sin(phaseAngle)
+    const cosA = Math.cos(displayedPhaseAngle)
+    const sinA = Math.sin(displayedPhaseAngle)
     const rotReal: number[] = []
     const rotImag: number[] = []
     for (let i = 0; i < result.mem_real.length; i++) {
@@ -420,21 +473,21 @@ export default function MemVsFittingPage() {
       rotImag.push(result.mem_real[i] * sinA + result.mem_imag[i] * cosA)
     }
     return { real: rotReal, imag: rotImag }
-  }, [result, phaseAngle])
+  }, [result, displayedPhaseAngle])
 
   useEffect(() => {
-    if (!result || !comparisonRef.current) return
+    if (!result || !activeReference || !comparisonRef.current) return
     const w = safeArr(result.wavenumbers)
     const rot = currentRotated!
     const traces = [
       { x: w, y: safeArr(rot.real), type: 'scatter', mode: 'lines', name: 'MEM Re[chi]', line: { color: '#e74c3c', width: 2 } },
-      { x: w, y: safeArr(result.fitting_real), type: 'scatter', mode: 'lines', name: 'Ideal Re[chi] from peak parameters', line: { color: '#e74c3c', width: 1.5, dash: 'dash' } },
+      { x: w, y: safeArr(activeReference.real), type: 'scatter', mode: 'lines', name: `${activeReference.label} Re[chi]`, line: { color: '#e74c3c', width: 1.5, dash: 'dash' } },
       { x: w, y: safeArr(rot.imag), type: 'scatter', mode: 'lines', name: 'MEM Im[chi]', line: { color: '#3498db', width: 2 } },
-      { x: w, y: safeArr(result.fitting_imag), type: 'scatter', mode: 'lines', name: 'Ideal Im[chi] from peak parameters', line: { color: '#3498db', width: 1.5, dash: 'dash' } },
+      { x: w, y: safeArr(activeReference.imag), type: 'scatter', mode: 'lines', name: `${activeReference.label} Im[chi]`, line: { color: '#3498db', width: 1.5, dash: 'dash' } },
     ]
     Plotly.newPlot(comparisonRef.current, traces, {
       title: {
-        text: `MEM reconstruction at error phase = ${selectedPhaseDeg.toFixed(2)}\u00b0 (${phaseAngle.toFixed(6)} rad)<br><sup>Selection: ${currentSelectionLabel}</sup>`,
+        text: `MEM reconstruction at error phase = ${selectedPhaseDeg.toFixed(2)}\u00b0 (${displayedPhaseAngle.toFixed(6)} rad)<br><sup>Selection: ${currentSelectionLabel}; reference: ${activeReference.label}</sup>`,
         font: { size: 14 },
       },
       xaxis: { title: 'Wavenumber (cm<sup>-1</sup>)' },
@@ -443,10 +496,10 @@ export default function MemVsFittingPage() {
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
     }, chartConfig)
-  }, [result, currentRotated, selectedPhaseDeg, phaseAngle, currentSelectionLabel])
+  }, [result, activeReference, currentRotated, selectedPhaseDeg, displayedPhaseAngle, currentSelectionLabel])
 
   useEffect(() => {
-    if (!result || !intensityRef.current) return
+    if (!result || !activeReference || !intensityRef.current) return
     const originalW = safeArr(result.original_wavenumbers)
     const memW = safeArr(result.mem_wavenumbers)
     Plotly.newPlot(intensityRef.current, [
@@ -463,27 +516,28 @@ export default function MemVsFittingPage() {
         line: { color: '#f39c12', width: 1.5, dash: 'dash' },
       },
       {
-        x: memW, y: safeArr(result.fitting_intensity),
+        x: memW, y: safeArr(activeReference.intensity),
         type: 'scatter', mode: 'lines',
-        name: 'Ideal spectrum from peak parameters',
+        name: activeReference.source === 'external_reference' ? 'External reference |chi|^2 from Re/Im' : 'Ideal spectrum from peak parameters',
         line: { color: '#8e44ad', width: 1.8, dash: 'dot' },
       },
     ], {
-      title: { text: 'Intensity Comparison: Import vs Peak-parameter Ideal', font: { size: 14 } },
+      title: { text: `Intensity Comparison: Import vs ${activeReference.source === 'external_reference' ? 'External Re/Im Reference' : 'Peak-parameter Ideal'}`, font: { size: 14 } },
       xaxis: { title: 'Wavenumber (cm<sup>-1</sup>)' },
       yaxis: { title: '|chi|^2' },
       hovermode: 'x',
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
     }, chartConfig)
-  }, [result])
+  }, [result, activeReference])
 
   useEffect(() => {
-    if (!result || !phaseScanData || 'alignmentError' in phaseScanData || !nrmseRef.current) return
+    const nrmseContainer = nrmseRef.current as PlotlyHTMLElement | null
+    if (!result || !phaseScanData || 'alignmentError' in phaseScanData || !nrmseContainer) return
     const nrmseYValues = phaseScanData.reNrmse.concat(phaseScanData.imNrmse)
       .concat(phaseScanData.windowMetrics ? phaseScanData.windowMetrics.reNrmse.concat(phaseScanData.windowMetrics.imNrmse) : [])
     const yMax = Math.max(...nrmseYValues) * 1.1 || 1
-    const traces: any[] = [
+    const traces: PlotlyTrace[] = [
       {
         x: phaseScanData.phaseDeg,
         y: phaseScanData.reNrmse,
@@ -563,24 +617,25 @@ export default function MemVsFittingPage() {
       line: { color: '#999', width: 1, dash: 'dash' },
       showlegend: false,
     })
-    Plotly.newPlot(nrmseRef.current, traces, {
-      title: { text: 'Full range and Selected window NRMSE vs Error Phase', font: { size: 14 } },
+    Plotly.newPlot(nrmseContainer, traces, {
+      title: { text: `Full range and Selected window NRMSE vs Error Phase<br><sup>Reference: ${phaseScanData.referenceLabel}</sup>`, font: { size: 14 } },
       xaxis: { title: 'Error phase (\u00b0)', range: [Math.min(...phaseScanData.phaseDeg), Math.max(...phaseScanData.phaseDeg)] },
       yaxis: { title: 'NRMSE' },
       hovermode: 'x',
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
     }, chartConfig)
-    const onClick = (eventData: any) => {
-      if (eventData?.points?.[0]) {
-        const x = eventData.points[0].x as number
+    const onClick = (eventData: PlotlyClickEvent) => {
+      const rawX = eventData.points?.[0]?.x
+      const x = typeof rawX === 'number' ? rawX : Number(rawX)
+      if (Number.isFinite(x)) {
         setPhaseAngle(degToRad(x))
         setPhaseSelectionMode('manual')
       }
     }
-    ;(nrmseRef.current as any).on?.('plotly_click', onClick)
+    nrmseContainer.on?.('plotly_click', onClick)
     return () => {
-      ;(nrmseRef.current as any)?.removeAllListeners?.('plotly_click')
+      nrmseContainer.removeAllListeners?.('plotly_click')
     }
   }, [phaseScanData, selectedPhaseDeg, result])
 
@@ -658,6 +713,51 @@ export default function MemVsFittingPage() {
     message.success(`Peak parameters exported (Phase unit: ${phaseUnitName(phaseUnit)})`)
   }
 
+  const applyExternalReferenceSelection = (
+    table = externalReferenceTable,
+    selection = externalReferenceSelection,
+    showSuccess = true,
+  ) => {
+    if (!table || !selection) return
+    try {
+      const parsed = buildReferenceSpectrumFromTable(table, selection)
+      setExternalReference(parsed)
+      setExternalReferenceError(null)
+      setPhaseSelectionMode('default')
+      if (showSuccess) {
+        message.success(`Applied external Re/Im reference: ${parsed.pointCount} points`)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unable to build external Re/Im reference from selected columns.'
+      setExternalReferenceError(msg)
+      message.error(msg)
+    }
+  }
+
+  const handleExternalReferenceUpload = (f: File) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string
+        const table = parseReferenceTable(text, f.name)
+        const detected = autoDetectReferenceColumns(table)
+        const parsed = buildReferenceSpectrumFromTable(table, detected)
+        setExternalReferenceTable(table)
+        setExternalReferenceSelection(detected)
+        setExternalReference(parsed)
+        setExternalReferenceError(null)
+        setPhaseSelectionMode('default')
+        message.success(`Imported external Re/Im reference: ${parsed.pointCount} points; auto-selected columns ${detected.wavenumber}/${detected.real}/${detected.imag}`)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unable to parse external Re/Im reference file.'
+        setExternalReferenceError(msg)
+        message.error(msg)
+      }
+    }
+    reader.readAsText(f)
+    return false
+  }
+
   const handleRun = async () => {
     if (!file) { message.warning('Please upload a CSV file'); return }
     if (memPoints == null) { message.error('MEM calculation points cannot be empty'); return }
@@ -674,12 +774,17 @@ export default function MemVsFittingPage() {
       const fitParams: FittingParams = { nr_real: nrReal, nr_imag: nrImag, peaks }
       const data = await api.runMemCompare(file, nn ?? undefined, memPoints, selectedColumn, fitParams)
       setResult(data)
+      if (!windowEdited || windowStart == null || windowEnd == null) {
+        setWindowStart(data.mem_frequency_range[0])
+        setWindowEnd(data.mem_frequency_range[1])
+        setWindowEdited(false)
+      }
       setPhaseSelectionMode('default')
       setPhaseAngle(0)
       if (comparisonRef.current) Plotly.purge(comparisonRef.current)
       if (nrmseRef.current) Plotly.purge(nrmseRef.current)
       if (intensityRef.current) Plotly.purge(intensityRef.current)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(api.getApiErrorMessage(e))
     } finally { setTimeout(() => setLoading(false), 100) }
   }
@@ -694,11 +799,14 @@ export default function MemVsFittingPage() {
       '# resampling_method,' + cell(result?.resampling_method),
       '# NN,' + cell(result?.nn),
       '# error_phase_deg,' + cell(selectedPhaseDeg),
-      '# error_phase_rad,' + cell(phaseAngle),
+      '# error_phase_rad,' + cell(displayedPhaseAngle),
       '# default_display_phase_deg,' + cell(defaultPhaseSelection?.phaseDeg),
       '# default_display_phase_rad,' + cell(defaultPhaseSelection?.phaseRad),
       '# default_display_criterion,' + cell(defaultPhaseSelection?.criterionKey),
       '# primary_nrmse_source,' + (phaseScanData.windowMetrics ? 'selected_window' : 'full_range'),
+      '# reference_source,' + cell(phaseScanData.referenceSource),
+      '# reference_label,' + cell(phaseScanData.referenceLabel),
+      '# reference_alignment_method,' + cell(phaseScanData.referenceAlignmentMethod),
       '# error_phase_scan_start_deg,' + cell(phaseScanStartDeg ?? undefined),
       '# error_phase_scan_end_deg,' + cell(phaseScanEndDeg ?? undefined),
       '# error_phase_scan_step_deg,' + cell(phaseScanStepDeg ?? undefined),
@@ -710,10 +818,10 @@ export default function MemVsFittingPage() {
       '# full_im_nrmse_min,' + cell(phaseScanData.imBest.value),
       '# NRMSE,Normalized Root Mean Square Error',
       '# NRMSE Chinese name,归一化均方根误差',
-      '# NRMSE normalization,RMSE divided by RMS amplitude of the corresponding ideal spectrum',
+      '# NRMSE normalization,RMSE divided by RMS amplitude of the corresponding reference spectrum',
       '# NRMSE epsilon,' + NRMSE_EPSILON,
-      '# ideal_re_rms,' + cell(phaseScanData.idealReRmsRaw),
-      '# ideal_im_rms,' + cell(phaseScanData.idealImRmsRaw),
+      '# reference_re_rms,' + cell(phaseScanData.idealReRmsRaw),
+      '# reference_im_rms,' + cell(phaseScanData.idealImRmsRaw),
       ...(windowNrmseEnabled ? [
         '# selected_window_requested_cm-1,' + rangeText(windowStart != null && windowEnd != null ? [windowStart, windowEnd] : undefined),
         '# selected_window_effective_cm-1,' + (phaseScanData.windowInfo ? rangeText([phaseScanData.windowInfo.effectiveStart, phaseScanData.windowInfo.effectiveEnd]) : ''),
@@ -771,7 +879,7 @@ export default function MemVsFittingPage() {
   }
 
   const handleExportComparison = () => {
-    if (!result || !currentRotated) return
+    if (!result || !currentRotated || !activeReference) return
     const lines = [
       '# N_original,' + cell(result.n_original),
       '# N_MEM,' + cell(result.n_mem),
@@ -780,28 +888,31 @@ export default function MemVsFittingPage() {
       '# resampling_method,' + cell(result.resampling_method),
       '# NN,' + cell(result.nn),
       '# error_phase_deg,' + cell(selectedPhaseDeg),
-      '# error_phase_rad,' + cell(phaseAngle),
+      '# error_phase_rad,' + cell(displayedPhaseAngle),
       '# phase_selection,' + currentSelectionLabel,
       '# default_display_phase_deg,' + cell(defaultPhaseSelection?.phaseDeg),
       '# default_display_phase_rad,' + cell(defaultPhaseSelection?.phaseRad),
       '# default_display_criterion,' + cell(defaultPhaseSelection?.criterionKey),
+      '# reference_source,' + cell(activeReference.source),
+      '# reference_label,' + cell(activeReference.label),
+      '# reference_alignment_method,' + cell(activeReference.alignmentMethod),
       '# note,' + cell(result.resampling_note),
-      'frequency_original,intensity_original,frequency_mem,intensity_mem_input,ideal_intensity_from_peak_parameters,Re_mem,Im_mem,Re_ideal_on_mem_grid,Im_ideal_on_mem_grid,Re_residual,Im_residual',
+      'frequency_original,intensity_original,frequency_mem,intensity_mem_input,reference_intensity_on_mem_grid,Re_mem,Im_mem,Re_reference_on_mem_grid,Im_reference_on_mem_grid,Re_residual,Im_residual',
     ]
     const rowCount = Math.max(result.original_wavenumbers.length, result.mem_wavenumbers.length)
     for (let i = 0; i < rowCount; i++) {
-      const reResidual = currentRotated.real[i] == null || result.fitting_real[i] == null ? undefined : currentRotated.real[i] - result.fitting_real[i]
-      const imResidual = currentRotated.imag[i] == null || result.fitting_imag[i] == null ? undefined : currentRotated.imag[i] - result.fitting_imag[i]
+      const reResidual = currentRotated.real[i] == null || activeReference.real[i] == null ? undefined : currentRotated.real[i] - activeReference.real[i]
+      const imResidual = currentRotated.imag[i] == null || activeReference.imag[i] == null ? undefined : currentRotated.imag[i] - activeReference.imag[i]
       lines.push([
         cell(result.original_wavenumbers[i]),
         cell(result.original_intensity[i]),
         cell(result.mem_wavenumbers[i]),
         cell(result.mem_input_intensity[i]),
-        cell(result.fitting_intensity[i]),
+        cell(activeReference.intensity[i]),
         cell(currentRotated.real[i]),
         cell(currentRotated.imag[i]),
-        cell(result.fitting_real[i]),
-        cell(result.fitting_imag[i]),
+        cell(activeReference.real[i]),
+        cell(activeReference.imag[i]),
         cell(reResidual),
         cell(imResidual),
       ].join(','))
@@ -970,6 +1081,96 @@ export default function MemVsFittingPage() {
         </Row>
       </Card>
 
+      <Card size="small" title="External Re/Im Reference Spectrum" style={{ marginTop: 12 }}>
+        <Space wrap style={{ marginBottom: 8 }}>
+          <Upload accept=".csv,.txt" maxCount={1} showUploadList={false} beforeUpload={handleExternalReferenceUpload}>
+            <Button size="small" icon={<UploadOutlined />}>Import Re/Im reference</Button>
+          </Upload>
+          <Button
+            size="small"
+            icon={<DeleteOutlined />}
+            disabled={!externalReference && !externalReferenceTable}
+            onClick={() => {
+              setExternalReferenceTable(null)
+              setExternalReferenceSelection(null)
+              setExternalReference(null)
+              setExternalReferenceError(null)
+              setPhaseSelectionMode('default')
+            }}
+          >
+            Clear reference
+          </Button>
+          {externalReference && (
+            <Text type="secondary">
+              {externalReference.name} | original points: {externalReference.pointCount} | range: {externalReference.frequencyRange[0]}-{externalReference.frequencyRange[1]} cm^-1
+            </Text>
+          )}
+        </Space>
+        <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 8 }}>
+          Optional. Import a CSV/TXT file and choose which columns are Wavenumber, Re and Im. The first selection is auto-detected when possible. When valid, this external spectrum replaces the peak-parameter ideal Re/Im as the NRMSE reference.
+        </Text>
+        {externalReferenceTable && externalReferenceSelection && (
+          <Space wrap style={{ marginBottom: 8, display: 'flex' }}>
+            <Text type="secondary">Rows: {externalReferenceTable.rowCount}</Text>
+            <Text type="secondary">Columns: {externalReferenceTable.columns.length}</Text>
+            <Text>Wavenumber</Text>
+            <Select
+              size="small"
+              value={externalReferenceSelection.wavenumber}
+              options={externalReferenceColumnOptions}
+              onChange={(value) => setExternalReferenceSelection({ ...externalReferenceSelection, wavenumber: value })}
+              style={{ width: 180 }}
+            />
+            <Text>Re</Text>
+            <Select
+              size="small"
+              value={externalReferenceSelection.real}
+              options={externalReferenceColumnOptions}
+              onChange={(value) => setExternalReferenceSelection({ ...externalReferenceSelection, real: value })}
+              style={{ width: 180 }}
+            />
+            <Text>Im</Text>
+            <Select
+              size="small"
+              value={externalReferenceSelection.imag}
+              options={externalReferenceColumnOptions}
+              onChange={(value) => setExternalReferenceSelection({ ...externalReferenceSelection, imag: value })}
+              style={{ width: 180 }}
+            />
+            <Button size="small" type="primary" onClick={() => applyExternalReferenceSelection()}>
+              Apply selected columns
+            </Button>
+          </Space>
+        )}
+        {externalReferenceError && <Alert type="error" message={externalReferenceError} showIcon style={{ marginBottom: 8 }} />}
+        {externalReference && !result && (
+          <Alert
+            type="info"
+            message="External reference has been imported. Run MEM & Compare to align it to the MEM output grid."
+            showIcon
+          />
+        )}
+        {result && alignedExternalReference?.error && (
+          <Alert
+            type="warning"
+            message={`${alignedExternalReference.error} NRMSE is still using the peak-parameter ideal spectrum.`}
+            showIcon
+          />
+        )}
+        {result && activeReference && (
+          <Space wrap style={{ display: 'flex' }}>
+            <Text type="secondary">Active NRMSE reference: {activeReference.label}</Text>
+            <Text type="secondary">Alignment: {activeReference.alignmentMethod}</Text>
+            {activeReference.originalPointCount != null && (
+              <Text type="secondary">Original reference points: {activeReference.originalPointCount}</Text>
+            )}
+          </Space>
+        )}
+        {alignedExternalReference?.aligned?.warnings.map((warning) => (
+          <Alert key={warning} type="info" message={warning} showIcon style={{ marginTop: 8 }} />
+        ))}
+      </Card>
+
       {!hasResult && (
         <div style={{ padding: 60, textAlign: 'center', background: '#fff', borderRadius: 8, marginTop: 12 }}>
           <Empty description="Upload a CSV and set peak parameters, then click Run" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -982,7 +1183,7 @@ export default function MemVsFittingPage() {
             <div ref={intensityRef} style={{ width: '100%', minHeight: 350 }} />
           </Card>
 
-          <Card size="small" title="MEM and Ideal Re/Im" style={{ marginTop: 12 }}
+          <Card size="small" title="MEM and Reference Re/Im" style={{ marginTop: 12 }}
             extra={<Button size="small" icon={<DownloadOutlined />} onClick={handleExportComparison}>Export Comparison CSV</Button>}>
             <div ref={comparisonRef} style={{ width: '100%', minHeight: 400 }} />
           </Card>
@@ -1063,7 +1264,7 @@ export default function MemVsFittingPage() {
                     size="small"
                   />
                   <Text type="secondary" style={{ whiteSpace: 'nowrap' }}>
-                    {selectedPhaseDeg.toFixed(2)}\u00b0 = {phaseAngle.toFixed(6)} rad
+                    {selectedPhaseDeg.toFixed(2)}\u00b0 = {displayedPhaseAngle.toFixed(6)} rad
                   </Text>
                   <Button
                     icon={<UndoOutlined />}
@@ -1098,6 +1299,9 @@ export default function MemVsFittingPage() {
               <>
                 <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 8 }}>
                   NRMSE = Normalized Root Mean Square Error（归一化均方根误差）
+                </Text>
+                <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 8 }}>
+                  Current reference for NRMSE: {phaseScanData.referenceLabel}
                 </Text>
                 <Row gutter={[12, 8]} align="middle" style={{ marginBottom: 8 }}>
                   <Col>

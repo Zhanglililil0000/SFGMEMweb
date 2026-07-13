@@ -1,7 +1,7 @@
 import { useRef, useEffect } from 'react'
 import 'plotly.js/dist/plotly.min.js'
 
-const Plotly = (window as any).Plotly
+const Plotly = window.Plotly
 
 interface IntensityChartProps {
   originalWavenumbers: number[]
@@ -37,7 +37,8 @@ export default function IntensityChart({
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!containerRef.current || originalWavenumbers.length === 0) return
+    const container = containerRef.current
+    if (!container || originalWavenumbers.length === 0) return
 
     function safeValues(arr: number[]): number[] {
       return arr.map((v) => (Number.isFinite(v) ? v : 0))
@@ -45,7 +46,7 @@ export default function IntensityChart({
 
     const safeOriginalWavenumbers = safeValues(originalWavenumbers)
     const safeOriginal = safeValues(originalIntensity)
-    const traces: any[] = [
+    const traces: PlotlyTrace[] = [
       {
         x: safeOriginalWavenumbers,
         y: safeOriginal,
@@ -67,12 +68,10 @@ export default function IntensityChart({
       })
     }
 
-    Plotly.newPlot(containerRef.current, traces, layout, config)
+    Plotly.newPlot(container, traces, layout, config)
 
     return () => {
-      if (containerRef.current) {
-        Plotly.purge(containerRef.current)
-      }
+      Plotly.purge(container)
     }
   }, [originalWavenumbers, originalIntensity, memWavenumbers, memInputIntensity])
 
