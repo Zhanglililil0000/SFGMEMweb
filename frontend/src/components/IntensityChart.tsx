@@ -8,6 +8,8 @@ interface IntensityChartProps {
   originalIntensity: number[]
   memWavenumbers?: number[]
   memInputIntensity?: number[]
+  originalFrequencyRange?: [number, number]
+  edgePaddingEnabled?: boolean
 }
 
 const layout = {
@@ -33,6 +35,8 @@ export default function IntensityChart({
   originalIntensity,
   memWavenumbers,
   memInputIntensity,
+  originalFrequencyRange,
+  edgePaddingEnabled = false,
 }: IntensityChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -57,23 +61,80 @@ export default function IntensityChart({
       },
     ]
 
-    if (memWavenumbers && memInputIntensity) {
+    const safeMemWavenumbers = memWavenumbers ? safeValues(memWavenumbers) : undefined
+    if (safeMemWavenumbers && memInputIntensity) {
       traces.push({
-        x: safeValues(memWavenumbers),
+        x: safeMemWavenumbers,
         y: safeValues(memInputIntensity),
         type: 'scatter',
         mode: 'lines',
-        name: 'MEM input spectrum',
+        name: edgePaddingEnabled ? 'Padded MEM input spectrum' : 'MEM input spectrum',
         line: { color: '#f39c12', width: 1.5, dash: 'dash' },
       })
     }
 
-    Plotly.newPlot(container, traces, layout, config)
+    const dynamicLayout: Record<string, unknown> = { ...layout }
+    if (edgePaddingEnabled && safeMemWavenumbers && originalFrequencyRange) {
+      const memStart = safeMemWavenumbers[0]
+      const memEnd = safeMemWavenumbers[safeMemWavenumbers.length - 1]
+      const [originalStart, originalEnd] = originalFrequencyRange
+      dynamicLayout.shapes = [
+        {
+          type: 'rect',
+          xref: 'x',
+          yref: 'paper',
+          x0: memStart,
+          x1: originalStart,
+          y0: 0,
+          y1: 1,
+          fillcolor: 'rgba(243, 156, 18, 0.10)',
+          line: { width: 0 },
+          layer: 'below',
+        },
+        {
+          type: 'rect',
+          xref: 'x',
+          yref: 'paper',
+          x0: originalEnd,
+          x1: memEnd,
+          y0: 0,
+          y1: 1,
+          fillcolor: 'rgba(243, 156, 18, 0.10)',
+          line: { width: 0 },
+          layer: 'below',
+        },
+        {
+          type: 'line',
+          xref: 'x',
+          yref: 'paper',
+          x0: originalStart,
+          x1: originalStart,
+          y0: 0,
+          y1: 1,
+          line: { color: '#666', width: 1, dash: 'dot' },
+        },
+        {
+          type: 'line',
+          xref: 'x',
+          yref: 'paper',
+          x0: originalEnd,
+          x1: originalEnd,
+          y0: 0,
+          y1: 1,
+          line: { color: '#666', width: 1, dash: 'dot' },
+        },
+      ]
+      dynamicLayout.title = {
+        text: `Intensity Spectrum |chi|^2<br><sup>Original range: ${originalStart}-${originalEnd} cm^-1; shaded regions are edge padding</sup>`,
+      }
+    }
+
+    Plotly.newPlot(container, traces, dynamicLayout, config)
 
     return () => {
       Plotly.purge(container)
     }
-  }, [originalWavenumbers, originalIntensity, memWavenumbers, memInputIntensity])
+  }, [originalWavenumbers, originalIntensity, memWavenumbers, memInputIntensity, originalFrequencyRange, edgePaddingEnabled])
 
   if (originalWavenumbers.length === 0) {
     return (

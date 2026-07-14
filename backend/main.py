@@ -20,6 +20,7 @@ from spectral_utils import (
 from sfg_generator import compute_sfg_spectrum
 
 app = FastAPI(title="MEM Analyzer API")
+DEFAULT_EDGE_PADDING_WIDTH = 1000.0
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,6 +91,53 @@ def parse_mem_points(value: Optional[str], default_value: int) -> int:
     return parsed
 
 
+def parse_bool_form(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_padding_width(value: Optional[str], label: str, default_value: float = 0.0) -> float:
+    if value is None or value.strip() == "":
+        return default_value
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"{label} must be a finite number")
+    if not np.isfinite(parsed):
+        raise HTTPException(status_code=422, detail=f"{label} must be a finite number")
+    if parsed < 0:
+        raise HTTPException(status_code=422, detail=f"{label} must be greater than or equal to 0")
+    return parsed
+
+
+def extract_selected_spectrum(
+    wavenumbers: np.ndarray,
+    data_matrix: np.ndarray,
+    column: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    try:
+        selected_intensity = data_matrix[:, column].copy()
+    except IndexError:
+        raise HTTPException(status_code=422, detail="Data column not found")
+
+    valid_mask = np.isfinite(wavenumbers) & np.isfinite(selected_intensity)
+    if int(np.count_nonzero(valid_mask)) < 3:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Selected Wavenumber and intensity columns must contain at least 3 numeric rows. "
+                "Please check the selected intensity column and ignore unrelated text or empty columns."
+            ),
+        )
+
+    filtered_wavenumbers = wavenumbers[valid_mask]
+    filtered_matrix = data_matrix[valid_mask]
+    original_intensity = selected_intensity[valid_mask]
+    intensity = get_intensity_column(filtered_matrix, column)
+    return filtered_wavenumbers, original_intensity, intensity
+
+
 @app.post("/api/mem/run")
 async def mem_run(
     file: UploadFile = File(...),
@@ -97,6 +145,9 @@ async def mem_run(
     mem_points: Optional[str] = Form(None),
     nnout: Optional[str] = Form(None),
     column: Optional[int] = Form(None),
+    edge_padding_enabled: Optional[str] = Form(None),
+    left_padding_width: Optional[str] = Form(None),
+    right_padding_width: Optional[str] = Form(None),
 ):
     if not file.filename or not file.filename.lower().endswith('.csv'):
         raise HTTPException(status_code=422, detail="Only CSV files are accepted")
@@ -114,20 +165,27 @@ async def mem_run(
     if column < 0 or column >= data_matrix.shape[1]:
         raise HTTPException(status_code=422, detail=f"Invalid column index: {column}")
 
-    try:
-        original_intensity = data_matrix[:, column].copy()
-        intensity = get_intensity_column(data_matrix, column)
-    except IndexError:
-        raise HTTPException(status_code=422, detail="Data column not found")
+    wavenumbers, original_intensity, intensity = extract_selected_spectrum(
+        wavenumbers,
+        data_matrix,
+        column,
+    )
 
     N_original = len(intensity)
     _n_mem = parse_mem_points(mem_points if mem_points is not None else nnout, N_original)
+    _edge_padding_enabled = parse_bool_form(edge_padding_enabled)
+    default_padding_width = DEFAULT_EDGE_PADDING_WIDTH if _edge_padding_enabled else 0.0
+    _left_padding_width = parse_padding_width(left_padding_width, "Left padding width", default_padding_width)
+    _right_padding_width = parse_padding_width(right_padding_width, "Right padding width", default_padding_width)
 
     try:
         mem_wavenumbers, mem_intensity, grid_info = resample_spectrum_for_mem(
             wavenumbers,
             intensity,
             _n_mem,
+            edge_padding_enabled=_edge_padding_enabled,
+            left_padding_width=_left_padding_width,
+            right_padding_width=_right_padding_width,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -153,16 +211,22 @@ async def mem_run(
         SS = np.abs(chiT) ** 2
 
     peak_idx = np.argmax(SS)
+    eval_indices = np.array(grid_info["evaluation_indices"], dtype=int)
 
     return {
         "wavenumbers": mem_wavenumbers.tolist(),
         "original_wavenumbers": wavenumbers.tolist(),
         "mem_wavenumbers": mem_wavenumbers.tolist(),
+        "evaluation_wavenumbers": mem_wavenumbers[eval_indices].tolist(),
         "original_intensity": original_intensity.tolist(),
         "mem_input_intensity": mem_intensity.tolist(),
+        "mem_input_intensity_eval": mem_intensity[eval_indices].tolist(),
         "reconstructed_intensity": SS.tolist(),
+        "reconstructed_intensity_eval": SS[eval_indices].tolist(),
         "real_part": np.real(chiT).tolist(),
         "imag_part": np.imag(chiT).tolist(),
+        "real_part_eval": np.real(chiT)[eval_indices].tolist(),
+        "imag_part_eval": np.imag(chiT)[eval_indices].tolist(),
         "peak_intensity": float(SS[peak_idx]),
         "n_points": int(_n_mem),
         "n_original": int(N_original),
@@ -188,6 +252,9 @@ async def mem_compare(
     mem_points: Optional[str] = Form(None),
     column: Optional[int] = Form(None),
     params_json: str = Form(...),
+    edge_padding_enabled: Optional[str] = Form(None),
+    left_padding_width: Optional[str] = Form(None),
+    right_padding_width: Optional[str] = Form(None),
 ):
     if not file.filename or not file.filename.lower().endswith('.csv'):
         raise HTTPException(status_code=422, detail="Only CSV files are accepted")
@@ -216,20 +283,27 @@ async def mem_compare(
     if column < 0 or column >= data_matrix.shape[1]:
         raise HTTPException(status_code=422, detail=f"Invalid column index: {column}")
 
-    try:
-        original_intensity = data_matrix[:, column].copy()
-        intensity = get_intensity_column(data_matrix, column)
-    except IndexError:
-        raise HTTPException(status_code=422, detail="Data column not found")
+    wavenumbers, original_intensity, intensity = extract_selected_spectrum(
+        wavenumbers,
+        data_matrix,
+        column,
+    )
 
     N_original = len(intensity)
     _n_mem = parse_mem_points(mem_points, N_original)
+    _edge_padding_enabled = parse_bool_form(edge_padding_enabled)
+    default_padding_width = DEFAULT_EDGE_PADDING_WIDTH if _edge_padding_enabled else 0.0
+    _left_padding_width = parse_padding_width(left_padding_width, "Left padding width", default_padding_width)
+    _right_padding_width = parse_padding_width(right_padding_width, "Right padding width", default_padding_width)
 
     try:
         mem_wavenumbers, mem_intensity, grid_info = resample_spectrum_for_mem(
             wavenumbers,
             intensity,
             _n_mem,
+            edge_padding_enabled=_edge_padding_enabled,
+            left_padding_width=_left_padding_width,
+            right_padding_width=_right_padding_width,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -261,18 +335,27 @@ async def mem_compare(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ideal spectrum from peak parameters calculation failed: {str(e)}")
 
+    eval_indices = np.array(grid_info["evaluation_indices"], dtype=int)
+
     return {
         "wavenumbers": mem_wavenumbers.tolist(),
         "original_wavenumbers": wavenumbers.tolist(),
         "mem_wavenumbers": mem_wavenumbers.tolist(),
+        "evaluation_wavenumbers": mem_wavenumbers[eval_indices].tolist(),
         "original_intensity": original_intensity.tolist(),
         "import_intensity": mem_intensity.tolist(),
         "mem_input_intensity": mem_intensity.tolist(),
+        "mem_input_intensity_eval": mem_intensity[eval_indices].tolist(),
         "fitting_intensity": fit_intensity.tolist(),
+        "fitting_intensity_eval": fit_intensity[eval_indices].tolist(),
         "mem_real": np.real(chiT).tolist(),
         "mem_imag": np.imag(chiT).tolist(),
+        "mem_real_eval": np.real(chiT)[eval_indices].tolist(),
+        "mem_imag_eval": np.imag(chiT)[eval_indices].tolist(),
         "fitting_real": fit_real.tolist(),
         "fitting_imag": fit_imag.tolist(),
+        "fitting_real_eval": fit_real[eval_indices].tolist(),
+        "fitting_imag_eval": fit_imag[eval_indices].tolist(),
         "n_points": int(_n_mem),
         "n_original": int(N_original),
         "n_mem": int(_n_mem),

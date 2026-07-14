@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import 'plotly.js/dist/plotly.min.js'
 import {
   Row, Col, Card, InputNumber, Button, Typography, message, Space,
-  Alert, Upload, Select, Slider, Empty, Switch,
+  Alert, Upload, Select, Slider, Empty, Switch, Checkbox,
 } from 'antd'
 import { DownloadOutlined, InboxOutlined, PlayCircleOutlined, UploadOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons'
 import * as api from '../api/mem'
@@ -41,6 +41,7 @@ const DEFAULT_PHASE_SCAN_END_DEG = 360
 const DEFAULT_PHASE_SCAN_STEP_DEG = 0.5
 const MAX_PHASE_SCAN_POINTS = 5000
 const MAX_MEM_CALCULATION_POINTS = 20000
+const DEFAULT_EDGE_PADDING_WIDTH = 1000
 
 const chartConfig = {
   displayModeBar: true,
@@ -63,6 +64,30 @@ function countCsvDataRows(text: string): number {
   const tokens = lines[0].split(',')
   const isHeader = isNaN(Number(tokens[0]?.trim()))
   return isHeader ? Math.max(lines.length - 1, 0) : lines.length
+}
+
+function readOriginalRange(text: string): [number, number] | null {
+  const rows = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  const values: number[] = []
+  for (const row of rows) {
+    const first = row.split(',')[0]?.trim()
+    const parsed = Number(first)
+    if (Number.isFinite(parsed)) values.push(parsed)
+  }
+  if (values.length < 2) return null
+  return [Math.min(...values), Math.max(...values)]
+}
+
+function valuesAtIndices(values: number[], indices: number[]): number[] {
+  return indices.map((index) => values[index]).filter((value) => value != null)
+}
+
+function expandEvaluationValues(totalLength: number, indices: number[], values: number[]): number[] {
+  const expanded: number[] = Array(totalLength).fill(Number.NaN)
+  indices.forEach((index, valueIndex) => {
+    expanded[index] = values[valueIndex]
+  })
+  return expanded
 }
 
 function cell(value: number | string | undefined): string {
@@ -245,10 +270,18 @@ function buildPhaseScanData(
   }
 
   const phaseDeg = phaseValues.map(radToDeg)
-  const fullPointIndices = result.wavenumbers.map((_, index) => index)
-  const fullMetrics = buildNrmseSeries(result, reference, phaseValues, fullPointIndices, 'Full range')
-  const spectrumStart = Math.min(...result.wavenumbers)
-  const spectrumEnd = Math.max(...result.wavenumbers)
+  const fullPointIndices = result.evaluation_indices?.length
+    ? result.evaluation_indices
+    : result.wavenumbers.map((_, index) => index)
+  if (fullPointIndices.length < 3) {
+    return {
+      alignmentError: 'Original evaluation range must contain at least 3 MEM grid points before NRMSE calculation.',
+    }
+  }
+  const fullRangeLabel = result.edge_padding_enabled ? 'Original evaluation range' : 'Full range'
+  const fullMetrics = buildNrmseSeries(result, reference, phaseValues, fullPointIndices, fullRangeLabel)
+  const spectrumStart = result.evaluation_frequency_range?.[0] ?? Math.min(...result.wavenumbers)
+  const spectrumEnd = result.evaluation_frequency_range?.[1] ?? Math.max(...result.wavenumbers)
 
   let windowMetrics: ReturnType<typeof buildNrmseSeries> | null = null
   let windowInfo: {
@@ -301,6 +334,8 @@ function buildPhaseScanData(
     referenceLabel: reference.label,
     referenceAlignmentMethod: reference.alignmentMethod,
     fullRange: [spectrumStart, spectrumEnd] as [number, number],
+    fullRangeLabel,
+    fullPointCount: fullMetrics.pointCount,
     diffReal: fullMetrics.diffReal,
     diffImag: fullMetrics.diffImag,
     reResidualStd: fullMetrics.reResidualStd,
@@ -345,7 +380,11 @@ export default function MemVsFittingPage() {
   const [nn, setNn] = useState<number | null>(null)
   const [memPoints, setMemPoints] = useState<number | null>(null)
   const [originalPoints, setOriginalPoints] = useState<number | null>(null)
+  const [originalRange, setOriginalRange] = useState<[number, number] | null>(null)
   const [memPointsEdited, setMemPointsEdited] = useState(false)
+  const [edgePaddingEnabled, setEdgePaddingEnabled] = useState(true)
+  const [leftPaddingWidth, setLeftPaddingWidth] = useState<number | null>(DEFAULT_EDGE_PADDING_WIDTH)
+  const [rightPaddingWidth, setRightPaddingWidth] = useState<number | null>(DEFAULT_EDGE_PADDING_WIDTH)
 
   const [nrReal, setNrReal] = useState(0.0)
   const [nrImag, setNrImag] = useState(0.0)
@@ -381,22 +420,34 @@ export default function MemVsFittingPage() {
     label: `${column.index}: ${column.name}`,
   })) ?? []
 
+  const evaluationIndices = useMemo(() => {
+    if (!result) return []
+    return result.evaluation_indices?.length
+      ? result.evaluation_indices
+      : result.wavenumbers.map((_, index) => index)
+  }, [result])
+
+  const evaluationWavenumbers = useMemo(() => (
+    result ? valuesAtIndices(result.wavenumbers, evaluationIndices) : []
+  ), [result, evaluationIndices])
+
   const alignedExternalReference = useMemo(() => {
     if (!result || !externalReference) return null
-    return alignReferenceToGrid(externalReference, result.wavenumbers)
-  }, [result, externalReference])
+    return alignReferenceToGrid(externalReference, evaluationWavenumbers)
+  }, [result, externalReference, evaluationWavenumbers])
 
   const activeReference = useMemo<ComparisonReference | null>(() => {
     if (!result) return null
     if (alignedExternalReference?.aligned) {
       const aligned = alignedExternalReference.aligned
+      const totalLength = result.wavenumbers.length
       return {
         source: 'external_reference',
         label: `External Re/Im reference: ${aligned.name}`,
-        real: aligned.real,
-        imag: aligned.imag,
-        intensity: aligned.intensity,
-        alignmentMethod: aligned.method,
+        real: expandEvaluationValues(totalLength, evaluationIndices, aligned.real),
+        imag: expandEvaluationValues(totalLength, evaluationIndices, aligned.imag),
+        intensity: expandEvaluationValues(totalLength, evaluationIndices, aligned.intensity),
+        alignmentMethod: `${aligned.method}; evaluated only over original spectrum range`,
         originalPointCount: aligned.originalPointCount,
         originalFrequencyRange: aligned.originalFrequencyRange,
       }
@@ -407,9 +458,9 @@ export default function MemVsFittingPage() {
       real: result.fitting_real,
       imag: result.fitting_imag,
       intensity: result.fitting_intensity,
-      alignmentMethod: 'Generated directly on the MEM output grid',
+      alignmentMethod: 'Generated directly on the MEM output grid; evaluated only over original spectrum range',
     }
-  }, [result, alignedExternalReference])
+  }, [result, alignedExternalReference, evaluationIndices])
 
   const phaseScanData = useMemo(() => {
     if (!result || !activeReference || phaseValues.length === 0) return null
@@ -442,11 +493,11 @@ export default function MemVsFittingPage() {
       phaseDeg: phaseScanData.imBest.phaseDeg,
       imNrmse: phaseScanData.imBest.value,
       reNrmseAtPhase: phaseScanData.reNrmse[index],
-      criterionKey: 'minimum_im_nrmse_full',
-      label: 'Full-range minimum Im-NRMSE',
+      criterionKey: result?.edge_padding_enabled ? 'minimum_im_nrmse_original_evaluation_range' : 'minimum_im_nrmse_full',
+      label: `${phaseScanData.fullRangeLabel} minimum Im-NRMSE`,
       windowLabel: '',
     }
-  }, [phaseScanData, windowNrmseEnabled])
+  }, [phaseScanData, windowNrmseEnabled, result])
 
   const displayedPhaseAngle = phaseSelectionMode === 'default' && defaultPhaseSelection
     ? defaultPhaseSelection.phaseRad
@@ -475,19 +526,36 @@ export default function MemVsFittingPage() {
     return { real: rotReal, imag: rotImag }
   }, [result, displayedPhaseAngle])
 
+  const currentRotatedEval = useMemo(() => {
+    if (!currentRotated) return null
+    return {
+      real: valuesAtIndices(currentRotated.real, evaluationIndices),
+      imag: valuesAtIndices(currentRotated.imag, evaluationIndices),
+    }
+  }, [currentRotated, evaluationIndices])
+
+  const activeReferenceEval = useMemo(() => {
+    if (!activeReference) return null
+    return {
+      real: valuesAtIndices(activeReference.real, evaluationIndices),
+      imag: valuesAtIndices(activeReference.imag, evaluationIndices),
+      intensity: valuesAtIndices(activeReference.intensity, evaluationIndices),
+    }
+  }, [activeReference, evaluationIndices])
+
   useEffect(() => {
-    if (!result || !activeReference || !comparisonRef.current) return
-    const w = safeArr(result.wavenumbers)
-    const rot = currentRotated!
+    if (!result || !activeReference || !activeReferenceEval || !currentRotatedEval || !comparisonRef.current) return
+    const w = safeArr(evaluationWavenumbers)
+    const rot = currentRotatedEval
     const traces = [
       { x: w, y: safeArr(rot.real), type: 'scatter', mode: 'lines', name: 'MEM Re[chi]', line: { color: '#e74c3c', width: 2 } },
-      { x: w, y: safeArr(activeReference.real), type: 'scatter', mode: 'lines', name: `${activeReference.label} Re[chi]`, line: { color: '#e74c3c', width: 1.5, dash: 'dash' } },
+      { x: w, y: safeArr(activeReferenceEval.real), type: 'scatter', mode: 'lines', name: `${activeReference.label} Re[chi]`, line: { color: '#e74c3c', width: 1.5, dash: 'dash' } },
       { x: w, y: safeArr(rot.imag), type: 'scatter', mode: 'lines', name: 'MEM Im[chi]', line: { color: '#3498db', width: 2 } },
-      { x: w, y: safeArr(activeReference.imag), type: 'scatter', mode: 'lines', name: `${activeReference.label} Im[chi]`, line: { color: '#3498db', width: 1.5, dash: 'dash' } },
+      { x: w, y: safeArr(activeReferenceEval.imag), type: 'scatter', mode: 'lines', name: `${activeReference.label} Im[chi]`, line: { color: '#3498db', width: 1.5, dash: 'dash' } },
     ]
     Plotly.newPlot(comparisonRef.current, traces, {
       title: {
-        text: `MEM reconstruction at error phase = ${selectedPhaseDeg.toFixed(2)}\u00b0 (${displayedPhaseAngle.toFixed(6)} rad)<br><sup>Selection: ${currentSelectionLabel}; reference: ${activeReference.label}</sup>`,
+        text: `MEM reconstruction at error phase = ${selectedPhaseDeg.toFixed(2)}\u00b0 (${displayedPhaseAngle.toFixed(6)} rad)<br><sup>Selection: ${currentSelectionLabel}; reference: ${activeReference.label}; residual/NRMSE only over ${result.evaluation_frequency_range[0]}-${result.evaluation_frequency_range[1]} cm^-1</sup>`,
         font: { size: 14 },
       },
       xaxis: { title: 'Wavenumber (cm<sup>-1</sup>)' },
@@ -496,13 +564,13 @@ export default function MemVsFittingPage() {
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
     }, chartConfig)
-  }, [result, activeReference, currentRotated, selectedPhaseDeg, displayedPhaseAngle, currentSelectionLabel])
+  }, [result, activeReference, activeReferenceEval, currentRotatedEval, evaluationWavenumbers, selectedPhaseDeg, displayedPhaseAngle, currentSelectionLabel])
 
   useEffect(() => {
-    if (!result || !activeReference || !intensityRef.current) return
+    if (!result || !activeReference || !activeReferenceEval || !intensityRef.current) return
     const originalW = safeArr(result.original_wavenumbers)
     const memW = safeArr(result.mem_wavenumbers)
-    Plotly.newPlot(intensityRef.current, [
+    const traces: PlotlyTrace[] = [
       {
         x: originalW, y: safeArr(result.original_intensity),
         type: 'scatter', mode: 'lines',
@@ -512,24 +580,37 @@ export default function MemVsFittingPage() {
       {
         x: memW, y: safeArr(result.mem_input_intensity),
         type: 'scatter', mode: 'lines',
-        name: 'MEM input spectrum',
+        name: result.edge_padding_enabled ? 'Padded MEM input spectrum' : 'MEM input spectrum',
         line: { color: '#f39c12', width: 1.5, dash: 'dash' },
       },
       {
-        x: memW, y: safeArr(activeReference.intensity),
+        x: safeArr(evaluationWavenumbers), y: safeArr(activeReferenceEval.intensity),
         type: 'scatter', mode: 'lines',
         name: activeReference.source === 'external_reference' ? 'External reference |chi|^2 from Re/Im' : 'Ideal spectrum from peak parameters',
         line: { color: '#8e44ad', width: 1.8, dash: 'dot' },
       },
-    ], {
-      title: { text: `Intensity Comparison: Import vs ${activeReference.source === 'external_reference' ? 'External Re/Im Reference' : 'Peak-parameter Ideal'}`, font: { size: 14 } },
+    ]
+    const shapes: Array<Record<string, unknown>> = []
+    if (result.edge_padding_enabled) {
+      const [originalStart, originalEnd] = result.original_frequency_range
+      const [memStart, memEnd] = result.mem_frequency_range
+      shapes.push(
+        { type: 'rect', xref: 'x', yref: 'paper', x0: memStart, x1: originalStart, y0: 0, y1: 1, fillcolor: 'rgba(243, 156, 18, 0.10)', line: { width: 0 }, layer: 'below' },
+        { type: 'rect', xref: 'x', yref: 'paper', x0: originalEnd, x1: memEnd, y0: 0, y1: 1, fillcolor: 'rgba(243, 156, 18, 0.10)', line: { width: 0 }, layer: 'below' },
+        { type: 'line', xref: 'x', yref: 'paper', x0: originalStart, x1: originalStart, y0: 0, y1: 1, line: { color: '#666', width: 1, dash: 'dot' } },
+        { type: 'line', xref: 'x', yref: 'paper', x0: originalEnd, x1: originalEnd, y0: 0, y1: 1, line: { color: '#666', width: 1, dash: 'dot' } },
+      )
+    }
+    Plotly.newPlot(intensityRef.current, traces, {
+      title: { text: `Intensity Comparison: Import vs ${activeReference.source === 'external_reference' ? 'External Re/Im Reference' : 'Peak-parameter Ideal'}<br><sup>Original/evaluation range: ${result.evaluation_frequency_range[0]}-${result.evaluation_frequency_range[1]} cm^-1${result.edge_padding_enabled ? '; shaded regions are edge padding' : ''}</sup>`, font: { size: 14 } },
       xaxis: { title: 'Wavenumber (cm<sup>-1</sup>)' },
       yaxis: { title: '|chi|^2' },
       hovermode: 'x',
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
+      shapes,
     }, chartConfig)
-  }, [result, activeReference])
+  }, [result, activeReference, activeReferenceEval, evaluationWavenumbers])
 
   useEffect(() => {
     const nrmseContainer = nrmseRef.current as PlotlyHTMLElement | null
@@ -543,7 +624,7 @@ export default function MemVsFittingPage() {
         y: phaseScanData.reNrmse,
         type: 'scatter',
         mode: 'lines',
-        name: 'Full range Re-NRMSE',
+        name: `${phaseScanData.fullRangeLabel} Re-NRMSE`,
         line: { color: '#c0392b', width: 2 },
       },
       {
@@ -551,7 +632,7 @@ export default function MemVsFittingPage() {
         y: phaseScanData.imNrmse,
         type: 'scatter',
         mode: 'lines',
-        name: 'Full range Im-NRMSE',
+        name: `${phaseScanData.fullRangeLabel} Im-NRMSE`,
         line: { color: '#2471a3', width: 2 },
       },
       {
@@ -618,7 +699,7 @@ export default function MemVsFittingPage() {
       showlegend: false,
     })
     Plotly.newPlot(nrmseContainer, traces, {
-      title: { text: `Full range and Selected window NRMSE vs Error Phase<br><sup>Reference: ${phaseScanData.referenceLabel}</sup>`, font: { size: 14 } },
+      title: { text: `${phaseScanData.fullRangeLabel} and Selected window NRMSE vs Error Phase<br><sup>Reference: ${phaseScanData.referenceLabel}; NRMSE evaluated only over original range ${phaseScanData.fullRange[0]}-${phaseScanData.fullRange[1]} cm^-1</sup>`, font: { size: 14 } },
       xaxis: { title: 'Error phase (\u00b0)', range: [Math.min(...phaseScanData.phaseDeg), Math.max(...phaseScanData.phaseDeg)] },
       yaxis: { title: 'NRMSE' },
       hovermode: 'x',
@@ -652,9 +733,11 @@ export default function MemVsFittingPage() {
         name: isHeader ? token.trim() : `Column ${i + 1}`,
       }))
       const pointCount = countCsvDataRows(text)
+      const range = readOriginalRange(text)
       setColumns(cols)
       setSelectedColumn(1)
       setOriginalPoints(pointCount)
+      setOriginalRange(range)
       if (!memPointsEdited) {
         setMemPoints(pointCount)
       }
@@ -768,15 +851,25 @@ export default function MemVsFittingPage() {
       message.error(`NN must be an integer between 2 and N_MEM - 1 (${memPoints - 1})`)
       return
     }
+    const leftWidth = leftPaddingWidth ?? 0
+    const rightWidth = rightPaddingWidth ?? 0
+    if (!Number.isFinite(leftWidth) || !Number.isFinite(rightWidth) || leftWidth < 0 || rightWidth < 0) {
+      message.error('Left and right padding widths must be finite numbers greater than or equal to 0')
+      return
+    }
     setLoading(true)
     setError(null)
     try {
       const fitParams: FittingParams = { nr_real: nrReal, nr_imag: nrImag, peaks }
-      const data = await api.runMemCompare(file, nn ?? undefined, memPoints, selectedColumn, fitParams)
+      const data = await api.runMemCompare(file, nn ?? undefined, memPoints, selectedColumn, fitParams, {
+        enabled: edgePaddingEnabled && (leftWidth > 0 || rightWidth > 0),
+        leftWidth,
+        rightWidth,
+      })
       setResult(data)
       if (!windowEdited || windowStart == null || windowEnd == null) {
-        setWindowStart(data.mem_frequency_range[0])
-        setWindowEnd(data.mem_frequency_range[1])
+        setWindowStart(data.evaluation_frequency_range[0])
+        setWindowEnd(data.evaluation_frequency_range[1])
         setWindowEdited(false)
       }
       setPhaseSelectionMode('default')
@@ -794,8 +887,14 @@ export default function MemVsFittingPage() {
     const lines = [
       '# N_original,' + cell(result?.n_original),
       '# N_MEM,' + cell(result?.n_mem),
+      '# N_eval,' + cell(result?.n_eval),
       '# original_frequency_range,' + rangeText(result?.original_frequency_range),
       '# mem_frequency_range,' + rangeText(result?.mem_frequency_range),
+      '# padded_frequency_range,' + rangeText(result?.padded_frequency_range),
+      '# evaluation_frequency_range,' + rangeText(result?.evaluation_frequency_range),
+      '# edge_padding_enabled,' + cell(result?.edge_padding_enabled ? 'true' : 'false'),
+      '# left_padding_width_cm-1,' + cell(result?.left_padding_width),
+      '# right_padding_width_cm-1,' + cell(result?.right_padding_width),
       '# resampling_method,' + cell(result?.resampling_method),
       '# NN,' + cell(result?.nn),
       '# error_phase_deg,' + cell(selectedPhaseDeg),
@@ -811,11 +910,14 @@ export default function MemVsFittingPage() {
       '# error_phase_scan_end_deg,' + cell(phaseScanEndDeg ?? undefined),
       '# error_phase_scan_step_deg,' + cell(phaseScanStepDeg ?? undefined),
       '# note,' + cell(result?.resampling_note),
-      '# full_range_cm-1,' + rangeText(phaseScanData.fullRange),
-      '# full_re_nrmse_optimal_phase_deg,' + cell(phaseScanData.reBest.phaseDeg),
-      '# full_re_nrmse_min,' + cell(phaseScanData.reBest.value),
-      '# full_im_nrmse_optimal_phase_deg,' + cell(phaseScanData.imBest.phaseDeg),
-      '# full_im_nrmse_min,' + cell(phaseScanData.imBest.value),
+      '# evaluation_range_cm-1,' + rangeText(phaseScanData.fullRange),
+      '# evaluation_points,' + cell(phaseScanData.fullPointCount),
+      '# nrmse_scope,' + cell(phaseScanData.fullRangeLabel),
+      '# padding_nrmse_note,Padding regions are not included in residual or NRMSE',
+      '# evaluation_re_nrmse_optimal_phase_deg,' + cell(phaseScanData.reBest.phaseDeg),
+      '# evaluation_re_nrmse_min,' + cell(phaseScanData.reBest.value),
+      '# evaluation_im_nrmse_optimal_phase_deg,' + cell(phaseScanData.imBest.phaseDeg),
+      '# evaluation_im_nrmse_min,' + cell(phaseScanData.imBest.value),
       '# NRMSE,Normalized Root Mean Square Error',
       '# NRMSE Chinese name,归一化均方根误差',
       '# NRMSE normalization,RMSE divided by RMS amplitude of the corresponding reference spectrum',
@@ -838,8 +940,8 @@ export default function MemVsFittingPage() {
     const header = [
       'error_phase_deg',
       'error_phase_rad',
-      're_nrmse_full',
-      'im_nrmse_full',
+      're_nrmse_evaluation',
+      'im_nrmse_evaluation',
     ]
     if (phaseScanData.windowMetrics && phaseScanData.windowInfo) {
       header.push(
@@ -879,16 +981,24 @@ export default function MemVsFittingPage() {
   }
 
   const handleExportComparison = () => {
-    if (!result || !currentRotated || !activeReference) return
+    if (!result || !currentRotated || !currentRotatedEval || !activeReference || !activeReferenceEval) return
     const lines = [
       '# N_original,' + cell(result.n_original),
       '# N_MEM,' + cell(result.n_mem),
+      '# N_eval,' + cell(result.n_eval),
       '# original_frequency_range,' + rangeText(result.original_frequency_range),
       '# mem_frequency_range,' + rangeText(result.mem_frequency_range),
+      '# padded_frequency_range,' + rangeText(result.padded_frequency_range),
+      '# evaluation_frequency_range,' + rangeText(result.evaluation_frequency_range),
+      '# edge_padding_enabled,' + cell(result.edge_padding_enabled ? 'true' : 'false'),
+      '# left_padding_width_cm-1,' + cell(result.left_padding_width),
+      '# right_padding_width_cm-1,' + cell(result.right_padding_width),
       '# resampling_method,' + cell(result.resampling_method),
       '# NN,' + cell(result.nn),
       '# error_phase_deg,' + cell(selectedPhaseDeg),
       '# error_phase_rad,' + cell(displayedPhaseAngle),
+      '# NRMSE evaluation range,' + rangeText(result.evaluation_frequency_range),
+      '# padding_nrmse_note,Padding regions are not included in residual or NRMSE',
       '# phase_selection,' + currentSelectionLabel,
       '# default_display_phase_deg,' + cell(defaultPhaseSelection?.phaseDeg),
       '# default_display_phase_rad,' + cell(defaultPhaseSelection?.phaseRad),
@@ -897,22 +1007,28 @@ export default function MemVsFittingPage() {
       '# reference_label,' + cell(activeReference.label),
       '# reference_alignment_method,' + cell(activeReference.alignmentMethod),
       '# note,' + cell(result.resampling_note),
-      'frequency_original,intensity_original,frequency_mem,intensity_mem_input,reference_intensity_on_mem_grid,Re_mem,Im_mem,Re_reference_on_mem_grid,Im_reference_on_mem_grid,Re_residual,Im_residual',
+      'frequency_original,intensity_original,frequency_mem_padded,intensity_mem_input_padded,Re_MEM_padded,Im_MEM_padded,region,frequency_eval,intensity_mem_input_eval,reference_intensity_eval,Re_MEM_eval,Im_MEM_eval,Re_reference_eval,Im_reference_eval,Re_residual_eval,Im_residual_eval',
     ]
-    const rowCount = Math.max(result.original_wavenumbers.length, result.mem_wavenumbers.length)
+    const evalMemInputIntensity = valuesAtIndices(result.mem_input_intensity, evaluationIndices)
+    const rowCount = Math.max(result.original_wavenumbers.length, result.mem_wavenumbers.length, evaluationWavenumbers.length)
     for (let i = 0; i < rowCount; i++) {
-      const reResidual = currentRotated.real[i] == null || activeReference.real[i] == null ? undefined : currentRotated.real[i] - activeReference.real[i]
-      const imResidual = currentRotated.imag[i] == null || activeReference.imag[i] == null ? undefined : currentRotated.imag[i] - activeReference.imag[i]
+      const reResidual = currentRotatedEval.real[i] == null || activeReferenceEval.real[i] == null ? undefined : currentRotatedEval.real[i] - activeReferenceEval.real[i]
+      const imResidual = currentRotatedEval.imag[i] == null || activeReferenceEval.imag[i] == null ? undefined : currentRotatedEval.imag[i] - activeReferenceEval.imag[i]
       lines.push([
         cell(result.original_wavenumbers[i]),
         cell(result.original_intensity[i]),
         cell(result.mem_wavenumbers[i]),
         cell(result.mem_input_intensity[i]),
-        cell(activeReference.intensity[i]),
         cell(currentRotated.real[i]),
         cell(currentRotated.imag[i]),
-        cell(activeReference.real[i]),
-        cell(activeReference.imag[i]),
+        cell(result.mem_regions[i]),
+        cell(evaluationWavenumbers[i]),
+        cell(evalMemInputIntensity[i]),
+        cell(activeReferenceEval.intensity[i]),
+        cell(currentRotatedEval.real[i]),
+        cell(currentRotatedEval.imag[i]),
+        cell(activeReferenceEval.real[i]),
+        cell(activeReferenceEval.imag[i]),
         cell(reResidual),
         cell(imResidual),
       ].join(','))
@@ -927,6 +1043,9 @@ export default function MemVsFittingPage() {
 
   const hasFile = file !== null
   const hasResult = result !== null
+  const paddedRange = originalRange
+    ? [originalRange[0] - (edgePaddingEnabled ? (leftPaddingWidth ?? 0) : 0), originalRange[1] + (edgePaddingEnabled ? (rightPaddingWidth ?? 0) : 0)] as [number, number]
+    : null
 
   return (
     <div>
@@ -941,8 +1060,12 @@ export default function MemVsFittingPage() {
                 setFileName('')
                 setColumns([])
                 setOriginalPoints(null)
+                setOriginalRange(null)
                 setMemPoints(null)
                 setMemPointsEdited(false)
+                setEdgePaddingEnabled(true)
+                setLeftPaddingWidth(DEFAULT_EDGE_PADDING_WIDTH)
+                setRightPaddingWidth(DEFAULT_EDGE_PADDING_WIDTH)
                 setWindowNrmseEnabled(false)
                 setWindowStart(null)
                 setWindowEnd(null)
@@ -981,17 +1104,78 @@ export default function MemVsFittingPage() {
               onClick={handleRun}>Run MEM &amp; Compare</Button>
           </Col>
         </Row>
+        <Row gutter={[12, 8]} align="middle" style={{ marginTop: 10 }}>
+          <Col xs={24} md={7}>
+            <Checkbox
+              checked={edgePaddingEnabled}
+              onChange={(event) => setEdgePaddingEnabled(event.target.checked)}
+            >
+              Enable edge padding / 启用两端扩展
+            </Checkbox>
+          </Col>
+          <Col xs={24} sm={12} md={7}>
+            <InputNumber
+              addonBefore="Left padding width (cm^-1)"
+              min={0}
+              value={leftPaddingWidth}
+              disabled={!edgePaddingEnabled}
+              onChange={setLeftPaddingWidth}
+              style={{ width: '100%' }}
+              size="small"
+            />
+          </Col>
+          <Col xs={24} sm={12} md={7}>
+            <InputNumber
+              addonBefore="Right padding width (cm^-1)"
+              min={0}
+              value={rightPaddingWidth}
+              disabled={!edgePaddingEnabled}
+              onChange={setRightPaddingWidth}
+              style={{ width: '100%' }}
+              size="small"
+            />
+          </Col>
+        </Row>
         {originalPoints != null && (
           <div style={{ marginTop: 4 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              N_original: {originalPoints}
-              {memPoints != null ? ` | N_MEM: ${memPoints}` : ''}
-            </Text>
+            <Space wrap size={[8, 0]}>
+              <Text type="secondary" style={{ fontSize: 12 }}>N_original: {originalPoints}</Text>
+              {memPoints != null && <Text type="secondary" style={{ fontSize: 12 }}>N_MEM: {memPoints}</Text>}
+              {originalRange && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Original spectrum range: {originalRange[0]}-{originalRange[1]} cm^-1
+                </Text>
+              )}
+              {edgePaddingEnabled && paddedRange && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  MEM processing range after padding: {paddedRange[0]}-{paddedRange[1]} cm^-1
+                </Text>
+              )}
+            </Space>
             <br />
             <Text type="secondary" style={{ fontSize: 12 }}>
-              通过插值增加 MEM 计算点数不会增加原始光谱信息。
+              Edge padding extends the input spectrum with constant endpoint intensities. MEM is performed on the padded spectrum, while evaluation and NRMSE are calculated only in the original spectral range. 两端扩展使用原始光谱端点强度进行恒值延伸；padding 不增加原始光谱信息。
             </Text>
           </div>
+        )}
+        {result && (
+          <Space wrap size={[8, 0]} style={{ marginTop: 4 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>Result N_original: {result.n_original}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>N_MEM: {result.n_mem}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>N_eval / NRMSE points: {result.n_eval}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Original range: {result.original_frequency_range[0]}-{result.original_frequency_range[1]} cm^-1
+            </Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              MEM processing range: {result.mem_frequency_range[0]}-{result.mem_frequency_range[1]} cm^-1
+            </Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Evaluation range: {result.evaluation_frequency_range[0]}-{result.evaluation_frequency_range[1]} cm^-1
+            </Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Edge padding: {result.edge_padding_enabled ? `on (${result.left_padding_width}/${result.right_padding_width} cm^-1)` : 'off'}
+            </Text>
+          </Space>
         )}
       </Card>
 
@@ -1346,7 +1530,7 @@ export default function MemVsFittingPage() {
                   </Col>
                   <Col>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      Full range: {phaseScanData.fullRange[0].toFixed(2)}-{phaseScanData.fullRange[1].toFixed(2)} cm^-1
+                      Evaluation range: {phaseScanData.fullRange[0].toFixed(2)}-{phaseScanData.fullRange[1].toFixed(2)} cm^-1 | points: {phaseScanData.fullPointCount}
                     </Text>
                   </Col>
                 </Row>
@@ -1376,16 +1560,16 @@ export default function MemVsFittingPage() {
                 )}
                 <Space wrap style={{ marginBottom: 8 }}>
                   <Text type="secondary">
-                    Full range minimum Re-NRMSE: {phaseScanData.reBest.value.toExponential(4)}
+                    {phaseScanData.fullRangeLabel} minimum Re-NRMSE: {phaseScanData.reBest.value.toExponential(4)}
                   </Text>
                   <Text type="secondary">
-                    Full range Re optimal phase: {phaseScanData.reBest.phaseDeg.toFixed(2)}\u00b0
+                    {phaseScanData.fullRangeLabel} Re optimal phase: {phaseScanData.reBest.phaseDeg.toFixed(2)}\u00b0
                   </Text>
                   <Text type="secondary">
-                    Full range minimum Im-NRMSE: {phaseScanData.imBest.value.toExponential(4)}
+                    {phaseScanData.fullRangeLabel} minimum Im-NRMSE: {phaseScanData.imBest.value.toExponential(4)}
                   </Text>
                   <Text type="secondary">
-                    Full range Im optimal phase: {phaseScanData.imBest.phaseDeg.toFixed(2)}\u00b0
+                    {phaseScanData.fullRangeLabel} Im optimal phase: {phaseScanData.imBest.phaseDeg.toFixed(2)}\u00b0
                   </Text>
                 </Space>
                 {windowNrmseEnabled && phaseScanData.windowInfo && phaseScanData.windowMetrics && (

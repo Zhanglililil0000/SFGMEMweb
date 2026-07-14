@@ -10,6 +10,7 @@ interface ComplexChartProps {
   referenceRealPart?: number[]
   referenceImagPart?: number[]
   referenceLabel?: string
+  evaluationRange?: [number, number]
 }
 
 const layout = {
@@ -37,6 +38,7 @@ const ComplexChart: React.FC<ComplexChartProps> = ({
   referenceRealPart,
   referenceImagPart,
   referenceLabel = 'External reference',
+  evaluationRange,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -96,12 +98,19 @@ const ComplexChart: React.FC<ComplexChartProps> = ({
       )
     }
 
-    Plotly.newPlot(container, traces, layout, config)
+    const dynamicLayout: Record<string, unknown> = { ...layout }
+    if (evaluationRange) {
+      dynamicLayout.title = {
+        text: `Complex Susceptibility chi(omega)<br><sup>Displayed evaluation range: ${evaluationRange[0]}-${evaluationRange[1]} cm^-1</sup>`,
+      }
+    }
+
+    Plotly.newPlot(container, traces, dynamicLayout, config)
 
     return () => {
       Plotly.purge(container)
     }
-  }, [wavenumbers, realPart, imagPart, referenceRealPart, referenceImagPart, referenceLabel])
+  }, [wavenumbers, realPart, imagPart, referenceRealPart, referenceImagPart, referenceLabel, evaluationRange])
 
   if (wavenumbers.length === 0) {
     return (

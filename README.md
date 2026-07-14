@@ -167,6 +167,8 @@ chi_q(omega) = A_q exp(i phi_q) V_complex(omega)
 Intensity(ω) = |χ_NR + Σχ_q(ω)|^2
 ```
 
+SFG Generator 的 GUI 图线、绘图数据和 CSV 导出直接使用后端返回的同一组 `intensity` 数组；程序不会对 `χ(ω)` 或 `Intensity(ω)` 做最大值归一化、额外 scale factor、除以 10/100，或任何单独的 display scaling。
+
 当 `Profile=voigt` 且 `Gaussian_FWHM=0` 时，`complex_voigt()` 会直接退化为原来的 Lorentzian 复响应。
 
 ### Phase unit for Phi import/export / Phi 相位单位
@@ -257,6 +259,38 @@ GUI 使用步骤：
 - 当前 GUI/API 限制 `N_MEM <= 20000`，过大的 `N_MEM` 会增加内存占用与计算时间。
 - `NN` 必须满足 `2 <= NN < N_MEM`。
 - 不同 `N_MEM` 下的 MEM 结果应优先通过 Re-NRMSE、Im-NRMSE 或其他明确的定量指标比较，不能只凭曲线是否更平滑判断优劣。
+
+## Edge Padding for MEM Input Spectra / MEM 输入光谱的两端扩展
+
+`MEM Analyzer` 和 `MEM vs Fitting` 支持可选的 `Enable edge padding / 启用两端扩展`。该功能用于减轻有限光谱窗口两端可能出现的 spectral leakage / edge artifact：进入 MEM 前，程序在原始光谱左右两端添加恒值延伸区，使 MEM 在更长的频率范围上处理。
+
+GUI 中该功能默认开启，左右 padding width 输入框默认均为 `1000 cm^-1`；会按当前输入值生效，用户可以关闭该复选框或改成任意非负宽度。
+
+扩展方式：
+
+- 左侧 padding 使用原始左端点强度；
+- 右侧 padding 使用原始右端点强度；
+- 原始光谱本身保留，不会被覆盖；
+- padding 区域只作为 MEM 边界处理，不应解释为真实实验光谱。
+
+示例：原始光谱为 `2800-3000 cm^-1`，且 `I(2800)=1`、`I(3000)=2`。若左右各扩展 `1000 cm^-1`，则 MEM 实际处理范围为 `1800-4000 cm^-1`；其中 `1800-2800 cm^-1` 强度恒定为 `1`，`2800-3000 cm^-1` 保留原始光谱，`3000-4000 cm^-1` 强度恒定为 `2`。Residual 和 NRMSE 仍只在原始 `2800-3000 cm^-1` 评价范围内计算。
+
+与 `MEM calculation points / N_MEM` 的关系：
+
+- `N_MEM` 仍表示最终送入 MEM 的总点数；
+- 启用 edge padding 后，`N_MEM` 均匀覆盖 padding 后的完整 MEM processing range；
+- 原始评价区间内实际用于 residual / NRMSE 的点数记为 `N_eval`，由 padded MEM grid 自动决定；
+- 若 `N_MEM` 太小，导致原始评价范围内少于 3 个点，程序会要求增加 `N_MEM` 或减小 padding width。
+
+与 NRMSE 和 selected-window NRMSE 的关系：
+
+- padding 区域不参与 residual 或 NRMSE；
+- 默认 optimal error phase 仍由原始评价范围内的 minimum Im-NRMSE 决定；
+- 启用 selected spectral window NRMSE 时，selected window 会被限制在原始光谱范围内；超出原始范围的部分会被裁剪，完全落在 padding 区域的窗口不会用于 NRMSE。
+
+GUI 会显示 `N_original`、`N_MEM`、original range、padded MEM processing range、evaluation range 和 `N_eval`。导出 CSV 会记录 `edge_padding_enabled`、左右 padding width、original / padded / evaluation range、`N_eval`，并在 full MEM 输出中增加 `region` 列，取值为 `left_padding`、`original` 或 `right_padding`。
+
+注意：edge padding 不增加原始实验信息，只是一种边界处理方法。不同 padding width 可能影响 MEM 结果，因此 benchmark 和导出文件中应记录 padding 参数。
 
 ## NRMSE 误差评估与 Error Phase 优化
 
@@ -388,6 +422,9 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_reference in se
 | `nn` | int | 否 | `min(1024, N_MEM//2)` | 时间域点数，必须满足 `2 <= NN < N_MEM` |
 | `mem_points` | int | 否 | `N_original` | MEM 内部均匀频率网格点数 `N_MEM` |
 | `column` | int | 否 | `1` | 强度列索引 |
+| `edge_padding_enabled` | bool | 否 | `false` | 是否启用两端恒值扩展 |
+| `left_padding_width` | float | 否 | `0`；启用 padding 且未传该字段时为 `1000` | 左端扩展宽度，单位 `cm^-1` |
+| `right_padding_width` | float | 否 | `0`；启用 padding 且未传该字段时为 `1000` | 右端扩展宽度，单位 `cm^-1` |
 
 响应：
 
@@ -396,6 +433,7 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_reference in se
   "wavenumbers": [2800.0, 2800.2, ...],
   "original_wavenumbers": [2800.0, 2800.5, ...],
   "mem_wavenumbers": [2800.0, 2800.2, ...],
+  "evaluation_wavenumbers": [2800.0, 2800.2, ...],
   "original_intensity": [0.001, 0.002, ...],
   "mem_input_intensity": [0.001, 0.0014, ...],
   "real_part": [0.03, 0.032, ...],
@@ -403,7 +441,13 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_reference in se
   "peak_intensity": 0.15,
   "n_original": 1000,
   "n_mem": 2500,
+  "n_eval": 2500,
   "nn": 500,
+  "edge_padding_enabled": false,
+  "left_padding_width": 0,
+  "right_padding_width": 0,
+  "evaluation_frequency_range": [2800.0, 3800.0],
+  "mem_regions": ["original", "original", "..."],
   "resampling_method": "Interpolated from 1000 to 2500 points"
 }
 ```
@@ -452,6 +496,9 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_reference in se
 | `mem_points` | int | MEM 计算点数 `N_MEM`（可选，默认 `N_original`） |
 | `column` | int | 强度列索引（可选） |
 | `params_json` | string | JSON 格式的 peak parameters（同 SFG Generator 格式，支持 Lorentzian/Voigt peak） |
+| `edge_padding_enabled` | bool | 是否启用两端恒值扩展（可选） |
+| `left_padding_width` | float | 左端扩展宽度，单位 `cm^-1`（可选） |
+| `right_padding_width` | float | 右端扩展宽度，单位 `cm^-1`（可选） |
 
 响应：
 
@@ -459,10 +506,13 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_reference in se
 {
   "wavenumbers": [...],
   "original_wavenumbers": [...],
+  "evaluation_wavenumbers": [...],
   "mem_input_intensity": [...],
   "mem_real": [...], "mem_imag": [...],
+  "mem_real_eval": [...], "mem_imag_eval": [...],
   "fitting_real": [...], "fitting_imag": [...],
-  "n_original": 1000, "n_mem": 2500, "nn": 500
+  "fitting_real_eval": [...], "fitting_imag_eval": [...],
+  "n_original": 1000, "n_mem": 2500, "n_eval": 2500, "nn": 500
 }
 ```
 
@@ -478,6 +528,7 @@ WN,Int
 ```
 
 支持带/不带表头。第一列为波数。数据自动按波数升序排列。
+MEM 导入只要求第一列波数和当前选择的强度列包含至少 3 行有效数值；同一 CSV 中其他无关列可以包含文本、备注或空值，不会导致有效光谱行被整体丢弃。
 
 **外部 Re/Im reference 输入** — MEM Analyzer 与 MEM vs Fitting 均支持灵活列选择：
 
@@ -508,11 +559,18 @@ Wavenumber,Re,Im
 # NN,1024
 # error_phase_deg,0
 # error_phase_rad,0
-frequency_original,intensity_original,frequency_mem,intensity_mem_input,Re_mem,Im_mem
-2800.0,0.0012,2800.0,0.0012,8.78283326e-03,-1.93211660e-02
+# edge_padding_enabled,false
+# left_padding_width_cm-1,0
+# right_padding_width_cm-1,0
+# evaluation_frequency_range,2800 to 3800
+# N_eval,5000
+frequency_original,intensity_original,frequency_mem_padded,intensity_mem_input_padded,Re_MEM_padded,Im_MEM_padded,region,frequency_eval,intensity_mem_input_eval,Re_MEM_eval,Im_MEM_eval
+2800.0,0.0012,2800.0,0.0012,8.78283326e-03,-1.93211660e-02,original,2800.0,0.0012,8.78283326e-03,-1.93211660e-02
 ```
 
-当 `N_original` 与 `N_MEM` 不同时，普通 CSV 表中无法让每一行同时一一对应原始谱和 MEM 结果；导出文件会使用空值补齐较短数组。若 MEM Analyzer 已导入外部 Re/Im reference，导出文件还会包含 `Re_reference_on_mem_grid`、`Im_reference_on_mem_grid`、`Re_residual`、`Im_residual` 以及当前 phase 下的 `Re_NRMSE`、`Im_NRMSE` metadata。
+当 `N_original` 与 `N_MEM` 不同时，普通 CSV 表中无法让每一行同时一一对应原始谱和 MEM 结果；导出文件会使用空值补齐较短数组。若 MEM Analyzer 已导入外部 Re/Im reference，导出文件还会包含 `Re_reference_eval`、`Im_reference_eval`、`Re_residual_eval`、`Im_residual_eval` 以及当前 phase 下的 `Re_NRMSE`、`Im_NRMSE` metadata。
+
+启用 edge padding 时，`frequency_mem_padded`、`intensity_mem_input_padded`、`Re_MEM_padded` 和 `Im_MEM_padded` 覆盖完整 padded MEM processing range；`region` 标记该行属于 `left_padding`、`original` 或 `right_padding`。`frequency_eval`、`Re_MEM_eval`、`Im_MEM_eval`、reference、residual 与 NRMSE 相关列只覆盖原始 evaluation range，padding 区域不参与 residual 或 NRMSE。
 
 MEM vs Fitting 的完整比较导出包含：
 
@@ -547,7 +605,7 @@ complex_residual_magnitude
 MEM vs Fitting 的 phase scan 默认只导出 NRMSE 相关列：
 
 ```
-error_phase_deg,error_phase_rad,re_nrmse_full,im_nrmse_full
+error_phase_deg,error_phase_rad,re_nrmse_evaluation,im_nrmse_evaluation
 ```
 
 导出 metadata 会记录当前默认展示的 phase：
@@ -559,6 +617,8 @@ default_display_criterion
 ```
 
 其中 `default_display_criterion` 可能为 `minimum_im_nrmse_full` 或 `minimum_im_nrmse_selected_window`。
+
+启用 edge padding 时，`re_nrmse_evaluation` 和 `im_nrmse_evaluation` 明确表示 original evaluation range 内的 NRMSE；metadata 会记录 `padding_nrmse_note`，说明 padding 区域不参与 residual 或 NRMSE。
 
 启用 selected-window NRMSE 且窗口有效时，会额外导出：
 
@@ -578,6 +638,7 @@ RMSE divided by RMS amplitude of the corresponding reference spectrum
 导出 metadata 还会记录完整光谱范围、用户设定的窗口范围、实际用于计算的有效窗口范围、full-range optimal phase 和 windowed optimal phase。
 
 SFG Generator 导出包含总谱与各子峰分量。SFG Generator 和 MEM vs Fitting 的 peak parameter 导出文件会按当前 `Phase unit` 输出 `Phi`，并在文件注释中写明 `Phase unit: degrees` 或 `Phase unit: radians`。
+SFG Generator 的 spectrum CSV 会对包含逗号的列名（例如 Voigt 子峰标签中的 `L HWHM` / `G FWHM` 描述）进行标准 CSV quoting；MEM 导入也兼容旧版本未加引号的 Voigt 子峰表头，只要第一列波数和所选强度列有效即可。
 
 ## MEM 算法
 

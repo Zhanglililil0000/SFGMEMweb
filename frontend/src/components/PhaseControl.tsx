@@ -1,6 +1,7 @@
 import { Slider, InputNumber, Button, Space, Card, Row, Col, Typography } from 'antd'
 import { UndoOutlined } from '@ant-design/icons'
 import ExportButton from './ExportButton'
+import type { MemRegion } from '../types/mem'
 import { degToRad, radToDeg } from '../utils/phaseUnit'
 
 const { Text } = Typography
@@ -20,11 +21,22 @@ interface PhaseControlProps {
   originalWavenumbers?: number[]
   originalIntensity?: number[]
   memInputIntensity?: number[]
+  memRegions?: MemRegion[]
+  evaluationWavenumbers?: number[]
+  evaluationRealPart?: number[]
+  evaluationImagPart?: number[]
+  evaluationMemInputIntensity?: number[]
   nOriginal?: number
   nMem?: number
+  nEval?: number
   nn?: number
   originalFrequencyRange?: [number, number]
   memFrequencyRange?: [number, number]
+  paddedFrequencyRange?: [number, number]
+  evaluationFrequencyRange?: [number, number]
+  edgePaddingEnabled?: boolean
+  leftPaddingWidth?: number
+  rightPaddingWidth?: number
   resamplingMethod?: string
   resamplingNote?: string
 }
@@ -52,11 +64,22 @@ const PhaseControl: React.FC<PhaseControlProps> = ({
   originalWavenumbers,
   originalIntensity,
   memInputIntensity,
+  memRegions,
+  evaluationWavenumbers,
+  evaluationRealPart,
+  evaluationImagPart,
+  evaluationMemInputIntensity,
   nOriginal,
   nMem,
+  nEval,
   nn,
   originalFrequencyRange,
   memFrequencyRange,
+  paddedFrequencyRange,
+  evaluationFrequencyRange,
+  edgePaddingEnabled,
+  leftPaddingWidth,
+  rightPaddingWidth,
   resamplingMethod,
   resamplingNote,
 }) => {
@@ -79,12 +102,23 @@ const PhaseControl: React.FC<PhaseControlProps> = ({
           originalWavenumbers={originalWavenumbers}
           originalIntensity={originalIntensity}
           memInputIntensity={memInputIntensity}
+          memRegions={memRegions}
+          evaluationWavenumbers={evaluationWavenumbers}
+          evaluationRealPart={evaluationRealPart}
+          evaluationImagPart={evaluationImagPart}
+          evaluationMemInputIntensity={evaluationMemInputIntensity}
           nOriginal={nOriginal}
           nMem={nMem}
+          nEval={nEval}
           nn={nn}
           phaseAngle={phaseAngle}
           originalFrequencyRange={originalFrequencyRange}
           memFrequencyRange={memFrequencyRange}
+          paddedFrequencyRange={paddedFrequencyRange}
+          evaluationFrequencyRange={evaluationFrequencyRange}
+          edgePaddingEnabled={edgePaddingEnabled}
+          leftPaddingWidth={leftPaddingWidth}
+          rightPaddingWidth={rightPaddingWidth}
           resamplingMethod={resamplingMethod}
           resamplingNote={resamplingNote}
         />

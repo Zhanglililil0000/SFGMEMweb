@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import type { MemResult } from '../types/mem'
+import type { EdgePaddingOptions, MemResult } from '../types/mem'
 import * as api from '../api/mem'
 
 function rotateComplex(
@@ -30,12 +30,13 @@ export function useMemResult() {
     file: File,
     nn?: number,
     memPoints?: number,
-    column?: number
+    column?: number,
+    edgePadding?: EdgePaddingOptions,
   ) => {
     setLoading(true)
     setError(null)
     try {
-      const data = await api.runMem(file, nn, memPoints, column)
+      const data = await api.runMem(file, nn, memPoints, column, edgePadding)
       originalRealRef.current = [...data.real_part]
       originalImagRef.current = [...data.imag_part]
       setResult(data)

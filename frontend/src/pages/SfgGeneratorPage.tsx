@@ -32,6 +32,11 @@ function emptyPeak(): SfgPeakParams {
   return { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_fwhm: 0 }
 }
 
+function csvCell(value: number | string): string {
+  const text = typeof value === 'number' ? value.toExponential(6) : value
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
 export default function SfgGeneratorPage() {
   const [xmin, setXmin] = useState(2800)
   const [xmax, setXmax] = useState(3800)
@@ -124,7 +129,7 @@ export default function SfgGeneratorPage() {
         const ci = (v: number[] | number) => (Array.isArray(v) ? v[i] : v)
         return [ci(c.intensity), ci(c.real), ci(c.imag)]
       })))
-    const csv = [header.join(','), ...rows.map((r) => r.map((v) => (typeof v === 'number' ? v.toExponential(6) : v)).join(','))].join('\n')
+    const csv = [header.map(csvCell).join(','), ...rows.map((r) => r.map(csvCell).join(','))].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url; a.download = 'SFG_spectrum.csv'

@@ -1,5 +1,6 @@
 import { Button, message } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
+import type { MemRegion } from '../types/mem'
 import { radToDeg } from '../utils/phaseUnit'
 
 interface ExportButtonProps {
@@ -14,12 +15,23 @@ interface ExportButtonProps {
   originalWavenumbers?: number[]
   originalIntensity?: number[]
   memInputIntensity?: number[]
+  memRegions?: MemRegion[]
+  evaluationWavenumbers?: number[]
+  evaluationRealPart?: number[]
+  evaluationImagPart?: number[]
+  evaluationMemInputIntensity?: number[]
   nOriginal?: number
   nMem?: number
+  nEval?: number
   nn?: number
   phaseAngle?: number
   originalFrequencyRange?: [number, number]
   memFrequencyRange?: [number, number]
+  paddedFrequencyRange?: [number, number]
+  evaluationFrequencyRange?: [number, number]
+  edgePaddingEnabled?: boolean
+  leftPaddingWidth?: number
+  rightPaddingWidth?: number
   resamplingMethod?: string
   resamplingNote?: string
 }
@@ -47,20 +59,41 @@ function exportToCsv(props: ExportButtonProps) {
     originalWavenumbers = [],
     originalIntensity = [],
     memInputIntensity = [],
+    memRegions = [],
+    evaluationWavenumbers,
+    evaluationRealPart,
+    evaluationImagPart,
+    evaluationMemInputIntensity,
     nOriginal,
     nMem,
+    nEval,
     nn,
     phaseAngle,
     originalFrequencyRange,
     memFrequencyRange,
+    paddedFrequencyRange,
+    evaluationFrequencyRange,
+    edgePaddingEnabled,
+    leftPaddingWidth,
+    rightPaddingWidth,
     resamplingMethod,
     resamplingNote,
   } = props
+  const evalW = evaluationWavenumbers ?? wavenumbers
+  const evalRe = evaluationRealPart ?? realPart
+  const evalIm = evaluationImagPart ?? imagPart
+  const evalInput = evaluationMemInputIntensity ?? memInputIntensity
   const lines: string[] = [
     '# N_original,' + cell(nOriginal),
     '# N_MEM,' + cell(nMem),
+    '# N_eval,' + cell(nEval ?? evalW.length),
     '# original_frequency_range,' + rangeText(originalFrequencyRange),
     '# mem_frequency_range,' + rangeText(memFrequencyRange),
+    '# padded_frequency_range,' + rangeText(paddedFrequencyRange ?? memFrequencyRange),
+    '# evaluation_frequency_range,' + rangeText(evaluationFrequencyRange ?? originalFrequencyRange),
+    '# edge_padding_enabled,' + cell(edgePaddingEnabled ? 'true' : 'false'),
+    '# left_padding_width_cm-1,' + cell(leftPaddingWidth),
+    '# right_padding_width_cm-1,' + cell(rightPaddingWidth),
     '# resampling_method,' + cell(resamplingMethod),
     '# NN,' + cell(nn),
     '# error_phase_deg,' + cell(phaseAngle == null ? undefined : radToDeg(phaseAngle)),
@@ -69,16 +102,18 @@ function exportToCsv(props: ExportButtonProps) {
       '# reference_source,' + cell(referenceLabel ?? 'External Re/Im reference'),
       '# Re_NRMSE,' + cell(reNrmse),
       '# Im_NRMSE,' + cell(imNrmse),
+      '# NRMSE evaluation range,' + rangeText(evaluationFrequencyRange ?? originalFrequencyRange),
+      '# NRMSE note,Padding regions are not included in residual or NRMSE',
       '# NRMSE,Normalized Root Mean Square Error',
       '# NRMSE Chinese name,归一化均方根误差',
       '# NRMSE normalization,RMSE divided by RMS amplitude of the corresponding reference spectrum',
     ] : []),
     '# note,' + cell(resamplingNote),
     referenceRealPart && referenceImagPart
-      ? 'frequency_original,intensity_original,frequency_mem,intensity_mem_input,Re_mem,Im_mem,Re_reference_on_mem_grid,Im_reference_on_mem_grid,Re_residual,Im_residual'
-      : 'frequency_original,intensity_original,frequency_mem,intensity_mem_input,Re_mem,Im_mem',
+      ? 'frequency_original,intensity_original,frequency_mem_padded,intensity_mem_input_padded,Re_MEM_padded,Im_MEM_padded,region,frequency_eval,intensity_mem_input_eval,Re_MEM_eval,Im_MEM_eval,Re_reference_eval,Im_reference_eval,Re_residual_eval,Im_residual_eval'
+      : 'frequency_original,intensity_original,frequency_mem_padded,intensity_mem_input_padded,Re_MEM_padded,Im_MEM_padded,region,frequency_eval,intensity_mem_input_eval,Re_MEM_eval,Im_MEM_eval',
   ]
-  const rowCount = Math.max(originalWavenumbers.length, wavenumbers.length)
+  const rowCount = Math.max(originalWavenumbers.length, wavenumbers.length, evalW.length)
   for (let i = 0; i < rowCount; i++) {
     const row = [
       cell(originalWavenumbers[i]),
@@ -87,10 +122,15 @@ function exportToCsv(props: ExportButtonProps) {
       cell(memInputIntensity[i]),
       cell(realPart[i]),
       cell(imagPart[i]),
+      cell(memRegions[i]),
+      cell(evalW[i]),
+      cell(evalInput[i]),
+      cell(evalRe[i]),
+      cell(evalIm[i]),
     ]
     if (referenceRealPart && referenceImagPart) {
-      const reResidual = realPart[i] == null || referenceRealPart[i] == null ? undefined : realPart[i] - referenceRealPart[i]
-      const imResidual = imagPart[i] == null || referenceImagPart[i] == null ? undefined : imagPart[i] - referenceImagPart[i]
+      const reResidual = evalRe[i] == null || referenceRealPart[i] == null ? undefined : evalRe[i] - referenceRealPart[i]
+      const imResidual = evalIm[i] == null || referenceImagPart[i] == null ? undefined : evalIm[i] - referenceImagPart[i]
       row.push(
         cell(referenceRealPart[i]),
         cell(referenceImagPart[i]),
@@ -124,12 +164,23 @@ const ExportButton: React.FC<ExportButtonProps> = ({
   originalWavenumbers,
   originalIntensity,
   memInputIntensity,
+  memRegions,
+  evaluationWavenumbers,
+  evaluationRealPart,
+  evaluationImagPart,
+  evaluationMemInputIntensity,
   nOriginal,
   nMem,
+  nEval,
   nn,
   phaseAngle,
   originalFrequencyRange,
   memFrequencyRange,
+  paddedFrequencyRange,
+  evaluationFrequencyRange,
+  edgePaddingEnabled,
+  leftPaddingWidth,
+  rightPaddingWidth,
   resamplingMethod,
   resamplingNote,
 }) => {
@@ -146,12 +197,23 @@ const ExportButton: React.FC<ExportButtonProps> = ({
       originalWavenumbers,
       originalIntensity,
       memInputIntensity,
+      memRegions,
+      evaluationWavenumbers,
+      evaluationRealPart,
+      evaluationImagPart,
+      evaluationMemInputIntensity,
       nOriginal,
       nMem,
+      nEval,
       nn,
       phaseAngle,
       originalFrequencyRange,
       memFrequencyRange,
+      paddedFrequencyRange,
+      evaluationFrequencyRange,
+      edgePaddingEnabled,
+      leftPaddingWidth,
+      rightPaddingWidth,
       resamplingMethod,
       resamplingNote,
     })

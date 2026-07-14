@@ -1,14 +1,21 @@
 import { useState } from 'react'
-import { Upload, Button, InputNumber, Select, Typography, Alert, message, Row, Col, Card } from 'antd'
+import { Upload, Button, InputNumber, Select, Typography, Alert, message, Row, Col, Card, Checkbox, Space } from 'antd'
 import { InboxOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import type { UploadFile } from 'antd/es/upload/interface'
-import type { ColumnInfo } from '../types/mem'
+import type { ColumnInfo, EdgePaddingOptions } from '../types/mem'
 
 const { Text } = Typography
 const MAX_MEM_CALCULATION_POINTS = 20000
+const DEFAULT_EDGE_PADDING_WIDTH = 1000
 
 interface UploadPanelProps {
-  onRun: (file: File, nn: number | undefined, memPoints: number | undefined, column: number) => void
+  onRun: (
+    file: File,
+    nn: number | undefined,
+    memPoints: number | undefined,
+    column: number,
+    edgePadding?: EdgePaddingOptions,
+  ) => void
   loading: boolean
   error: string | null
 }
@@ -21,6 +28,18 @@ function countCsvDataRows(text: string): number {
   return hasHeader ? Math.max(lines.length - 1, 0) : lines.length
 }
 
+function readOriginalRange(text: string): [number, number] | null {
+  const rows = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  const values: number[] = []
+  for (const row of rows) {
+    const first = row.split(',')[0]?.trim()
+    const parsed = Number(first)
+    if (Number.isFinite(parsed)) values.push(parsed)
+  }
+  if (values.length < 2) return null
+  return [Math.min(...values), Math.max(...values)]
+}
+
 function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
   const [file, setFile] = useState<File | null>(null)
   const [fileList, setFileList] = useState<UploadFile[]>([])
@@ -29,8 +48,12 @@ function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
   const [nn, setNn] = useState<number | null>(null)
   const [memPoints, setMemPoints] = useState<number | null>(null)
   const [originalPoints, setOriginalPoints] = useState<number | null>(null)
+  const [originalRange, setOriginalRange] = useState<[number, number] | null>(null)
   const [memPointsEdited, setMemPointsEdited] = useState(false)
   const [fileName, setFileName] = useState<string>('')
+  const [edgePaddingEnabled, setEdgePaddingEnabled] = useState(true)
+  const [leftPaddingWidth, setLeftPaddingWidth] = useState<number | null>(DEFAULT_EDGE_PADDING_WIDTH)
+  const [rightPaddingWidth, setRightPaddingWidth] = useState<number | null>(DEFAULT_EDGE_PADDING_WIDTH)
 
   const handleBeforeUpload = (file: File) => {
     const reader = new FileReader()
@@ -48,9 +71,11 @@ function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
         name: isHeader ? token.trim() : `Column ${i + 1}`,
       }))
       const pointCount = countCsvDataRows(text)
+      const range = readOriginalRange(text)
       setColumns(cols)
       setSelectedColumn(1)
       setOriginalPoints(pointCount)
+      setOriginalRange(range)
       // 新光谱导入时，若用户已手动设置 N_MEM，则保留该值，避免无提示覆盖。
       if (!memPointsEdited) {
         setMemPoints(pointCount)
@@ -71,8 +96,12 @@ function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
     setFileList([])
     setFileName('')
     setOriginalPoints(null)
+    setOriginalRange(null)
     setMemPoints(null)
     setMemPointsEdited(false)
+    setEdgePaddingEnabled(true)
+    setLeftPaddingWidth(DEFAULT_EDGE_PADDING_WIDTH)
+    setRightPaddingWidth(DEFAULT_EDGE_PADDING_WIDTH)
   }
 
   const handleRun = () => {
@@ -100,10 +129,23 @@ function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
       message.error(`NN must be an integer between 2 and N_MEM - 1 (${memPoints - 1})`)
       return
     }
-    onRun(file, nn ?? undefined, memPoints, selectedColumn)
+    const leftWidth = leftPaddingWidth ?? 0
+    const rightWidth = rightPaddingWidth ?? 0
+    if (!Number.isFinite(leftWidth) || !Number.isFinite(rightWidth) || leftWidth < 0 || rightWidth < 0) {
+      message.error('Left and right padding widths must be finite numbers greater than or equal to 0')
+      return
+    }
+    onRun(file, nn ?? undefined, memPoints, selectedColumn, {
+      enabled: edgePaddingEnabled && (leftWidth > 0 || rightWidth > 0),
+      leftWidth,
+      rightWidth,
+    })
   }
 
   const hasFile = file !== null
+  const paddedRange = originalRange
+    ? [originalRange[0] - (edgePaddingEnabled ? (leftPaddingWidth ?? 0) : 0), originalRange[1] + (edgePaddingEnabled ? (rightPaddingWidth ?? 0) : 0)] as [number, number]
+    : null
 
   return (
     <Card title="Data Setup" size="small">
@@ -186,16 +228,60 @@ function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
           </Button>
         </Col>
       </Row>
+      <Row gutter={[16, 8]} align="middle" style={{ marginTop: 10 }}>
+        <Col xs={24} md={7}>
+          <Checkbox
+            checked={edgePaddingEnabled}
+            onChange={(event) => setEdgePaddingEnabled(event.target.checked)}
+          >
+            Enable edge padding / 启用两端扩展
+          </Checkbox>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <InputNumber
+            addonBefore="Left padding width (cm^-1)"
+            min={0}
+            value={leftPaddingWidth}
+            disabled={!edgePaddingEnabled}
+            onChange={setLeftPaddingWidth}
+            style={{ width: '100%' }}
+            size="small"
+          />
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <InputNumber
+            addonBefore="Right padding width (cm^-1)"
+            min={0}
+            value={rightPaddingWidth}
+            disabled={!edgePaddingEnabled}
+            onChange={setRightPaddingWidth}
+            style={{ width: '100%' }}
+            size="small"
+          />
+        </Col>
+      </Row>
       {columns.length > 0 && (
         <div style={{ marginTop: 4 }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {fileName} — {columns.length} columns
-            {originalPoints != null ? ` | N_original: ${originalPoints}` : ''}
-            {memPoints != null ? ` | N_MEM: ${memPoints}` : ''}
-          </Text>
+          <Space wrap size={[8, 0]}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {fileName} — {columns.length} columns
+            </Text>
+            {originalPoints != null && <Text type="secondary" style={{ fontSize: 12 }}>N_original: {originalPoints}</Text>}
+            {memPoints != null && <Text type="secondary" style={{ fontSize: 12 }}>N_MEM: {memPoints}</Text>}
+            {originalRange && (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Original spectrum range: {originalRange[0]}-{originalRange[1]} cm^-1
+              </Text>
+            )}
+            {edgePaddingEnabled && paddedRange && (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                MEM processing range after padding: {paddedRange[0]}-{paddedRange[1]} cm^-1
+              </Text>
+            )}
+          </Space>
           <br />
           <Text type="secondary" style={{ fontSize: 12 }}>
-            通过插值增加 MEM 计算点数不会增加原始光谱信息。
+            Edge padding extends the input spectrum with constant endpoint intensities. MEM is performed on the padded spectrum, while evaluation and NRMSE are calculated only in the original spectral range. 两端扩展使用原始光谱端点强度进行恒值延伸；padding 不增加原始光谱信息。
           </Text>
         </div>
       )}

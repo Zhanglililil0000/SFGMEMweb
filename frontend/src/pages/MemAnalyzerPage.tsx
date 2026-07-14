@@ -21,6 +21,10 @@ import {
 const { Footer } = Layout
 const { Text } = Typography
 
+function valuesAtIndices(values: number[], indices: number[]): number[] {
+  return indices.map((index) => values[index]).filter((value) => value != null)
+}
+
 function MemAnalyzerPage() {
   const { result, loading, error, phaseAngle, runMem, setPhase, resetPhase } = useMemResult()
   const [referenceTable, setReferenceTable] = useState<ReferenceTable | null>(null)
@@ -29,21 +33,40 @@ function MemAnalyzerPage() {
   const [referenceImportError, setReferenceImportError] = useState<string | null>(null)
 
   const hasResult = result !== null
+  const evaluationIndices = useMemo(() => {
+    if (!result) return []
+    return result.evaluation_indices?.length
+      ? result.evaluation_indices
+      : result.wavenumbers.map((_, index) => index)
+  }, [result])
+  const evaluationWavenumbers = useMemo(() => (
+    result ? valuesAtIndices(result.wavenumbers, evaluationIndices) : []
+  ), [result, evaluationIndices])
+  const evaluationRealPart = useMemo(() => (
+    result ? valuesAtIndices(result.real_part, evaluationIndices) : []
+  ), [result, evaluationIndices])
+  const evaluationImagPart = useMemo(() => (
+    result ? valuesAtIndices(result.imag_part, evaluationIndices) : []
+  ), [result, evaluationIndices])
+  const evaluationMemInputIntensity = useMemo(() => (
+    result ? valuesAtIndices(result.mem_input_intensity, evaluationIndices) : []
+  ), [result, evaluationIndices])
+
   const alignedReference = useMemo(() => {
     if (!result || !referenceSpectrum) return null
-    return alignReferenceToGrid(referenceSpectrum, result.wavenumbers)
-  }, [result, referenceSpectrum])
+    return alignReferenceToGrid(referenceSpectrum, evaluationWavenumbers)
+  }, [result, referenceSpectrum, evaluationWavenumbers])
 
   const referenceNrmse = useMemo(() => {
     if (!result || !alignedReference?.aligned) return null
     return computeNrmseAgainstReference(
-      result.real_part,
-      result.imag_part,
+      evaluationRealPart,
+      evaluationImagPart,
       alignedReference.aligned.real,
       alignedReference.aligned.imag,
       'External reference',
     )
-  }, [result, alignedReference])
+  }, [result, alignedReference, evaluationRealPart, evaluationImagPart])
 
   const referenceColumnOptions = referenceTable?.columns.map((column) => ({
     value: column.index,
@@ -109,18 +132,21 @@ function MemAnalyzerPage() {
                       originalIntensity={result.original_intensity}
                       memWavenumbers={result.mem_wavenumbers}
                       memInputIntensity={result.mem_input_intensity}
+                      originalFrequencyRange={result.original_frequency_range}
+                      edgePaddingEnabled={result.edge_padding_enabled}
                     />
                   </div>
                 </Col>
                 <Col xs={24} lg={12}>
                   <div style={{ background: '#fff', borderRadius: 8, padding: 16 }}>
                     <ComplexChart
-                      wavenumbers={result.wavenumbers}
-                      realPart={result.real_part}
-                      imagPart={result.imag_part}
+                      wavenumbers={evaluationWavenumbers}
+                      realPart={evaluationRealPart}
+                      imagPart={evaluationImagPart}
                       referenceRealPart={alignedReference?.aligned?.real}
                       referenceImagPart={alignedReference?.aligned?.imag}
                       referenceLabel="Reference"
+                      evaluationRange={result.evaluation_frequency_range}
                     />
                   </div>
                 </Col>
@@ -192,12 +218,12 @@ function MemAnalyzerPage() {
                   <>
                     <Space wrap style={{ display: 'flex', marginBottom: 6 }}>
                       <Text type="secondary">Alignment: {alignedReference.aligned.method}</Text>
-                      <Text type="secondary">MEM-grid points: {alignedReference.aligned.pointCount}</Text>
+                      <Text type="secondary">Evaluation points: {alignedReference.aligned.pointCount}</Text>
                       <Text type="secondary">Re-NRMSE: {referenceNrmse.metrics.reNrmse.toExponential(4)}</Text>
                       <Text type="secondary">Im-NRMSE: {referenceNrmse.metrics.imNrmse.toExponential(4)}</Text>
                     </Space>
                     <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
-                      NRMSE = Normalized Root Mean Square Error（归一化均方根误差），computed at the current selected error phase.
+                      NRMSE = Normalized Root Mean Square Error（归一化均方根误差），computed at the current selected error phase only over the original spectrum range.
                     </Text>
                   </>
                 )}
@@ -226,11 +252,22 @@ function MemAnalyzerPage() {
                   originalWavenumbers={result.original_wavenumbers}
                   originalIntensity={result.original_intensity}
                   memInputIntensity={result.mem_input_intensity}
+                  memRegions={result.mem_regions}
+                  evaluationWavenumbers={evaluationWavenumbers}
+                  evaluationRealPart={evaluationRealPart}
+                  evaluationImagPart={evaluationImagPart}
+                  evaluationMemInputIntensity={evaluationMemInputIntensity}
                   nOriginal={result.n_original}
                   nMem={result.n_mem}
+                  nEval={result.n_eval}
                   nn={result.nn}
                   originalFrequencyRange={result.original_frequency_range}
                   memFrequencyRange={result.mem_frequency_range}
+                  paddedFrequencyRange={result.padded_frequency_range}
+                  evaluationFrequencyRange={result.evaluation_frequency_range}
+                  edgePaddingEnabled={result.edge_padding_enabled}
+                  leftPaddingWidth={result.left_padding_width}
+                  rightPaddingWidth={result.right_padding_width}
                   resamplingMethod={result.resampling_method}
                   resamplingNote={result.resampling_note}
                 />
@@ -259,7 +296,7 @@ function MemAnalyzerPage() {
       {hasResult && result && (
         <Footer style={{ textAlign: 'center', padding: '8px 24px', background: '#f0f2f5' }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            N_original: {result.n_original} | N_MEM: {result.n_mem} | NN: {result.nn} | Original range: {result.original_frequency_range[0]} - {result.original_frequency_range[1]} | MEM range: {result.mem_frequency_range[0]} - {result.mem_frequency_range[1]} | {result.resampling_method} | Peak: {result.peak_intensity.toExponential(4)}
+            N_original: {result.n_original} | N_MEM: {result.n_mem} | N_eval: {result.n_eval} | NN: {result.nn} | Original range: {result.original_frequency_range[0]} - {result.original_frequency_range[1]} | MEM processing range: {result.mem_frequency_range[0]} - {result.mem_frequency_range[1]} | Evaluation range: {result.evaluation_frequency_range[0]} - {result.evaluation_frequency_range[1]} | Edge padding: {result.edge_padding_enabled ? `on (${result.left_padding_width}/${result.right_padding_width} cm^-1)` : 'off'} | {result.resampling_method} | Peak: {result.peak_intensity.toExponential(4)}
           </Text>
           <br />
           <Text type="secondary" style={{ fontSize: 12 }}>

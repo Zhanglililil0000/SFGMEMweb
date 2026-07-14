@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { MemResult, PhaseRequest, PhaseResponse, SfgGenerateRequest, SfgResult, FittingParams, MemCompareResult } from '../types/mem'
+import type { EdgePaddingOptions, MemResult, PhaseRequest, PhaseResponse, SfgGenerateRequest, SfgResult, FittingParams, MemCompareResult } from '../types/mem'
 
 const api = axios.create({ baseURL: '/api' })
 
@@ -21,13 +21,19 @@ export async function runMem(
   file: File,
   nn?: number,
   memPoints?: number,
-  column?: number
+  column?: number,
+  edgePadding?: EdgePaddingOptions,
 ): Promise<MemResult> {
   const formData = new FormData()
   formData.append('file', file)
   if (nn != null) formData.append('nn', String(nn))
   if (memPoints != null) formData.append('mem_points', String(memPoints))
   if (column != null) formData.append('column', String(column))
+  if (edgePadding) {
+    formData.append('edge_padding_enabled', String(edgePadding.enabled))
+    formData.append('left_padding_width', String(edgePadding.leftWidth))
+    formData.append('right_padding_width', String(edgePadding.rightWidth))
+  }
   const { data } = await api.post<MemResult>('/mem/run', formData)
   return data
 }
@@ -48,12 +54,18 @@ export async function runMemCompare(
   memPoints: number | undefined,
   column: number | undefined,
   fitParams: FittingParams,
+  edgePadding?: EdgePaddingOptions,
 ): Promise<MemCompareResult> {
   const formData = new FormData()
   formData.append('file', file)
   if (nn != null) formData.append('nn', String(nn))
   if (memPoints != null) formData.append('mem_points', String(memPoints))
   if (column != null) formData.append('column', String(column))
+  if (edgePadding) {
+    formData.append('edge_padding_enabled', String(edgePadding.enabled))
+    formData.append('left_padding_width', String(edgePadding.leftWidth))
+    formData.append('right_padding_width', String(edgePadding.rightWidth))
+  }
   formData.append('params_json', JSON.stringify(fitParams))
   const { data } = await api.post<MemCompareResult>('/mem/compare', formData)
   return data
