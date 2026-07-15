@@ -52,6 +52,28 @@ class SfgGeneratorIntensityTests(unittest.TestCase):
         for deg_values, rad_values in zip(deg_result[:4], rad_result[:4]):
             np.testing.assert_allclose(deg_values, rad_values, rtol=1e-12, atol=1e-12)
 
+    def test_voigt_gaussian_hwhm_matches_equivalent_fwhm(self):
+        wavenumbers = np.linspace(2980.0, 3020.0, 9)
+        params = [0.0, 0.0, 1.0, 3000.0, 10.0]
+
+        hwhm_result = compute_sfg_spectrum(
+            wavenumbers,
+            params,
+            phases=[0.0],
+            peak_options=[{"profile_type": "voigt", "gaussian_hwhm": 6.0}],
+        )
+        fwhm_result = compute_sfg_spectrum(
+            wavenumbers,
+            params,
+            phases=[0.0],
+            peak_options=[{"profile_type": "voigt", "gaussian_fwhm": 12.0}],
+        )
+
+        for hwhm_values, fwhm_values in zip(hwhm_result[:4], fwhm_result[:4]):
+            np.testing.assert_allclose(hwhm_values, fwhm_values, rtol=1e-12, atol=1e-12)
+
+        self.assertIn("G HWHM=6", hwhm_result[4][1]["label"])
+
 
 if __name__ == "__main__":
     unittest.main()

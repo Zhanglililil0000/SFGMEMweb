@@ -1,7 +1,5 @@
 import { useRef, useEffect } from 'react'
-import 'plotly.js/dist/plotly.min.js'
-
-const Plotly = window.Plotly
+import { plotWhenReady } from '../utils/plotlyLoader'
 
 interface ComplexChartProps {
   wavenumbers: number[]
@@ -105,11 +103,7 @@ const ComplexChart: React.FC<ComplexChartProps> = ({
       }
     }
 
-    Plotly.newPlot(container, traces, dynamicLayout, config)
-
-    return () => {
-      Plotly.purge(container)
-    }
+    return plotWhenReady(container, traces, dynamicLayout, config)
   }, [wavenumbers, realPart, imagPart, referenceRealPart, referenceImagPart, referenceLabel, evaluationRange])
 
   if (wavenumbers.length === 0) {

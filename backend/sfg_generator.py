@@ -16,7 +16,10 @@ def normalize_peak_options(n_peaks, phases=None, peak_options=None):
     for q in range(n_peaks):
         options = dict(peak_options[q]) if peak_options and q < len(peak_options) else {}
         options.setdefault("profile_type", "lorentzian")
+        if "gaussian_hwhm" in options and "gaussian_fwhm" not in options:
+            options["gaussian_fwhm"] = 2.0 * float(options["gaussian_hwhm"])
         options.setdefault("gaussian_fwhm", 0.0)
+        options.setdefault("gaussian_hwhm", float(options["gaussian_fwhm"]) / 2.0)
         options["phase"] = phases[q]
         normalized.append(options)
     return normalized
@@ -32,7 +35,7 @@ def compute_sfg_spectrum(wavenumbers, params, phases=None, peak_options=None):
     params: [NR_Real, NR_Imag, A1, omega1, Gamma1, A2, omega2, Gamma2, ...].
     Gamma keeps the original project convention: Lorentzian HWHM.
     phases: [phi1, phi2, ...]  — one per peak. If None, all default to 0.
-    peak_options: optional profile_type / gaussian_fwhm metadata per peak.
+    peak_options: optional profile_type / gaussian_hwhm or gaussian_fwhm metadata per peak.
     """
     if len(params) < 2:
         raise ValueError("Need at least NR_Real and NR_Imag")
@@ -71,10 +74,11 @@ def compute_sfg_spectrum(wavenumbers, params, phases=None, peak_options=None):
         sub_q_intensity = np.abs(chi_q) ** 2
         profile_type = peaks[q].get("profile_type", "lorentzian")
         gaussian_fwhm = float(peaks[q].get("gaussian_fwhm", 0.0))
+        gaussian_hwhm = float(peaks[q].get("gaussian_hwhm", gaussian_fwhm / 2.0))
         width = float(peaks[q].get("width", 0.0))
         label = f"Peak {q + 1} ({profile_type}, L HWHM={width:g}"
         if profile_type == "voigt":
-            label += f", G FWHM={gaussian_fwhm:g}"
+            label += f", G HWHM={gaussian_hwhm:g}"
         label += ")"
         sub_components.append({
             "label": label,

@@ -1,7 +1,5 @@
 import { useRef, useEffect } from 'react'
-import 'plotly.js/dist/plotly.min.js'
-
-const Plotly = window.Plotly
+import { plotWhenReady } from '../utils/plotlyLoader'
 
 interface IntensityChartProps {
   originalWavenumbers: number[]
@@ -129,11 +127,7 @@ export default function IntensityChart({
       }
     }
 
-    Plotly.newPlot(container, traces, dynamicLayout, config)
-
-    return () => {
-      Plotly.purge(container)
-    }
+    return plotWhenReady(container, traces, dynamicLayout, config)
   }, [originalWavenumbers, originalIntensity, memWavenumbers, memInputIntensity, originalFrequencyRange, edgePaddingEnabled])
 
   if (originalWavenumbers.length === 0) {

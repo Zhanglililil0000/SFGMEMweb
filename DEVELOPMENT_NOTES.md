@@ -1,6 +1,6 @@
 # DEVELOPMENT_NOTES / 项目开发交接说明
 
-更新时间：2026-07-14
+更新时间：2026-07-15
 
 本文用于给后续 Codex 新对话或人工开发者快速了解当前项目状态。本文只记录开发状态与约定，不改变任何计算逻辑。
 
@@ -118,12 +118,19 @@ chi_q(omega) = A_q exp(i phi_q) / (omega_q - omega - i Gamma_q)
 - Lorentzian FWHM = `2 * Gamma`。
 - Voigt 使用 `backend/spectrum_models.py` 中的 `complex_voigt()`。
 - `complex_voigt()` 调用 `scipy.special.wofz`，即 Faddeeva function。
-- `Gaussian_FWHM` 是 Gaussian 全宽 FWHM，内部转换为 sigma：
+- GUI 和新 peak parameter 文件中的 Voigt Gaussian 输入统一使用 `Gaussian_HWHM`（半宽），旧字段 `Gaussian_FWHM` 仍可导入并自动除以 2 转成 HWHM。
+- 前端/API 会把 `Gaussian_HWHM` 转成等价 `Gaussian_FWHM` 后送入现有 Voigt 计算路径，核心 complex Voigt 公式不变。
+- Voigt peak 面板会自动逐行显示非重复且已定义的派生宽度，包括 Lorentzian FWHM、Gaussian FWHM、Gaussian standard deviation (sigma)、近似 Voigt HWHM/FWHM 和 Voigt equivalent Gaussian sigma：
 
 ```text
-sigma = Gaussian_FWHM / (2 sqrt(2 ln 2))
+Gaussian_FWHM = 2 * Gaussian_HWHM
+sigma = Gaussian_HWHM / sqrt(2 ln 2)
+Voigt_FWHM ≈ 0.5346 * Lorentzian_FWHM + sqrt(0.2166 * Lorentzian_FWHM^2 + Gaussian_FWHM^2)
 ```
 
+- Voigt 宽度显示使用 Olivero-Longbothum 近似，只是 GUI 读数，不改变 complex Voigt response 的计算定义。
+- Gaussian HWHM 输入框后不再保留单独计算按钮；派生值由面板自动刷新。
+- Lorentzian 的严格标准差不存在；含非零 Lorentzian 分量的 Voigt 严格标准差也不存在。GUI 不显示这些 undefined 项，只显示从近似 Voigt FWHM 折算的 equivalent Gaussian sigma 作为宽度量级参考。
 - 程序实现的是 complex Voigt response，不是对最终强度 `|chi|^2` 做卷积。
 
 ### Fitting Analysis 页面
@@ -176,6 +183,15 @@ Intensity(omega) = |chi(omega)|^2
   - `90°` 转成 radians 与 `1.57079632679 rad` 的输出等价。
 - README 已补充说明：SFG Generator 不对 `chi(omega)` 或 `Intensity(omega)` 做归一化或显示缩放。
 
+### Frontend bundle 与小屏布局
+
+- 前端页面已改为 React lazy loading，四个主页面按需加载，避免首屏一次性加载全部页面代码。
+- Plotly 不再在图表组件或页面顶层静态导入；统一通过 `frontend/src/utils/plotlyLoader.ts` 按需加载 `plotly.js/lib/core`。
+- 由于 Plotly core 已内置 scatter trace，当前图表只加载 Plotly core，不再加载完整 `plotly.min.js`。
+- `frontend/vite.config.ts` 已移除对完整 `plotly.js` 的 `optimizeDeps.include`，并把 `chunkSizeWarningLimit` 设置为 `1200`，对应当前按需 Plotly core chunk 的体积预算。
+- `npm.cmd run build` 当前已不再输出 Plotly chunk size warning。
+- `SFG Generator` 参数卡片在桌面端仍保持固定高度滚动；在 `lg` 以下屏幕自动恢复内容高度，减少小屏幕参数面板拥挤和滚动套滚动问题。
+
 ## 3. 重要约定
 
 请后续开发务必保持以下约定，除非用户明确要求修改物理定义。
@@ -227,14 +243,16 @@ phi_rad = phi_deg * pi / 180
 
 当前没有已知必须立即修复的计算逻辑阻塞，但后续仍建议关注：
 
-1. GUI 视觉和布局仍可继续打磨，尤其是参数面板在小屏幕下的拥挤问题。
-2. Plotly 打包体积较大，`npm run build` 会提示 chunk size warning；这不是编译失败，但后续可考虑按页面懒加载或拆分 Plotly。
-3. 当前已有少量后端回归测试覆盖 SFG intensity 解析值；前端仍主要依赖 `npm run build`、`npm run lint` 和人工 GUI 操作，还没有系统化的前端自动测试套件。
+1. GUI 视觉和布局仍可继续打磨；SFG Generator 参数面板的小屏幕拥挤问题已做一轮响应式处理，但 MEM Analyzer、MEM vs Fitting 和 Fitting Analysis 仍建议后续用真实小屏设备手动复核。
+2. Plotly 已改为按需加载 core bundle，`npm run build` 当前不再提示 chunk size warning；后续若新增非 scatter 图形类型，需要确认是否必须注册额外 Plotly trace，并重新检查构建体积。
+3. 当前已有少量后端回归测试覆盖 SFG intensity 解析值；前端仍主要依赖 `npm run build`、`npm run lint` 和人工 GUI 操作，还没有系统化的前端自动测试套件。本轮尝试使用内置浏览器打开本地生产构建时被浏览器插件以 `ERR_BLOCKED_BY_CLIENT` 拦截，未完成可视化浏览器验证。
 4. 若运行时出现 `Request failed with status code 502`，通常表示前端 dev server 无法访问后端，需要确认 `backend/main.py` 已启动且 `/api/health` 正常。
 5. Git 在某些 Windows 用户环境下可能提示 `dubious ownership`，这是 Git 安全检查，不影响程序运行；需要 Git 操作时可临时使用 `git -c safe.directory=...`，不要随意修改用户全局配置，除非用户明确同意。
 6. 外部 reference 文件导入已支持灵活列选择，但仍建议用真实实验文件做更多手动验证，确认不同表头、分隔符和列顺序都符合预期。
 7. MEM 的 `NN`、`N_MEM`、插值网格和 phase scan 结果可能对数值稳定性有影响；比较不同设置时应使用 NRMSE 和 residual，而不是只看曲线平滑程度。
 8. 如果后续再次观察到 SFG Generator intensity 与旧版本或手算结果差约一个数量级，优先检查外部参考谱、旧版本定义、输入参数单位和 amplitude/linewidth 含义差异；不要直接乘以 10，也不要引入 arbitrary scale factor。
+9. 如果再次出现 `At least 3 original points are required for MEM calculation`，优先检查当前选择的强度列在 CSV 清洗后是否确实有至少 3 个数值点。SFG Generator 新导出的 Voigt spectrum CSV 已对带逗号表头做标准 quoting，MEM 导入也已兼容旧版未 quote 的 Voigt 表头；如果仍报错，通常是选到了非强度列、文本列，或文件中有效波数/强度行不足。
+10. `npm.cmd run build` 与 `npm.cmd run lint` 并行运行时偶发 Vite/Rolldown `index.html` emitted asset 路径错误；单独顺序运行 build/lint 可通过。后续如要彻底解决，需要检查 Vite/Rolldown 在 Windows 路径和并发构建下的行为。
 
 ## 5. 运行程序和测试的方法
 
@@ -295,15 +313,22 @@ npm.cmd run build
 npm.cmd run lint
 ```
 
+当前建议顺序运行 build 和 lint，避免并行执行；并行执行曾偶发 Vite/Rolldown `index.html` 路径错误。
+
 ### 后端回归测试
 
-当前已有 SFG intensity 解析测试：
+当前已有后端回归测试覆盖 edge padding、CSV 导入清洗、SFG Generator intensity 解析值、nonresonant contribution、phase unit 等价性，以及 Voigt Gaussian HWHM/FWHM 等价性：
 
 ```bash
 python -m unittest discover -s backend\tests
 ```
 
-该测试会验证单峰解析强度、nonresonant contribution 和 peak phase radians 等价性。
+在 Windows PowerShell 中，如需避免测试运行时生成或改动 `__pycache__`，可临时使用：
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'
+python -m unittest discover -s backend\tests
+```
 
 目前常用验证标准：
 
@@ -343,3 +368,4 @@ npm run lint
 ```
 
 14. 如需检查后端接口，可先启动后端并访问 `/api/health`，再进行 GUI 或 API 测试。
+15. 前端验证命令建议顺序运行，不要把 `npm.cmd run build` 和 `npm.cmd run lint` 并行跑，除非正在专门排查 Vite/Rolldown 并发构建问题。

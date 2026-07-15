@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import 'plotly.js/dist/plotly.min.js'
 import {
   Alert, Button, Card, Col, Empty, InputNumber, Row, Select, Space,
   Spin, Typography, Upload, message,
@@ -21,6 +20,12 @@ import {
 } from '../utils/phaseUnit'
 import { buildImportedPeak, importedPeakIndices, normalizeProfileType, profileTypeOptions } from '../utils/sfgPeakParams'
 import {
+  gaussianHwhmToFwhm,
+  gaussianHwhmToSigma,
+  peakGaussianHwhm,
+  peakWidthSummaryLines,
+} from '../utils/lineShapeWidths'
+import {
   NRMSE_EPSILON,
   alignReferenceToGrid,
   alignScalarReferenceToGrid,
@@ -34,8 +39,8 @@ import {
   type ReferenceTable,
   type ScalarReference,
 } from '../utils/referenceSpectrum'
+import { plotWhenReady } from '../utils/plotlyLoader'
 
-const Plotly = window.Plotly
 const { Text } = Typography
 const MAX_FITTING_POINTS = 10000
 
@@ -56,7 +61,7 @@ interface ScalarNrmse {
 }
 
 function emptyPeak(): SfgPeakParams {
-  return { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_fwhm: 0 }
+  return { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_hwhm: 0 }
 }
 
 function stripPeakLabel(peak: SfgPeakParams): SfgPeakParams {
@@ -66,7 +71,7 @@ function stripPeakLabel(peak: SfgPeakParams): SfgPeakParams {
     width: peak.width,
     phase: peak.phase,
     profile_type: peak.profile_type ?? 'lorentzian',
-    gaussian_fwhm: peak.gaussian_fwhm ?? 0,
+    gaussian_hwhm: peakGaussianHwhm(peak),
   }
 }
 
@@ -390,6 +395,7 @@ export default function FittingAnalysisPage() {
     ]
     peaks.forEach((peak, index) => {
       const n = index + 1
+      const gaussianHwhm = peakGaussianHwhm(peak)
       lines.push(
         `Profile${n}=${peak.profile_type ?? 'lorentzian'}`,
         `A${n}=${formatParameterNumber(peak.amplitude)}`,
@@ -397,7 +403,9 @@ export default function FittingAnalysisPage() {
         `Gamma${n}=${formatParameterNumber(peak.width)}`,
         `Lorentzian_HWHM${n}=${formatParameterNumber(peak.width)}`,
         `Lorentzian_FWHM${n}=${formatParameterNumber(2 * peak.width)}`,
-        `Gaussian_FWHM${n}=${formatParameterNumber(peak.gaussian_fwhm ?? 0)}`,
+        `Gaussian_HWHM${n}=${formatParameterNumber(gaussianHwhm)}`,
+        `Gaussian_FWHM${n}=${formatParameterNumber(gaussianHwhmToFwhm(gaussianHwhm))}`,
+        `Gaussian_sigma${n}=${formatParameterNumber(gaussianHwhmToSigma(gaussianHwhm))}`,
         `Phi${n}=${formatPhaseForUnit(peak.phase, phaseUnit)}`,
       )
     })
@@ -471,14 +479,22 @@ export default function FittingAnalysisPage() {
         `# fitted_peak_${index + 1}_profile,${cell(peak.profile_type ?? 'lorentzian')}`,
         `# fitted_peak_${index + 1}_amplitude,${cell(peak.amplitude)}`,
         `# fitted_peak_${index + 1}_center,${cell(peak.center)}`,
-        `# fitted_peak_${index + 1}_linewidth,${cell(peak.width)}`,
+        `# fitted_peak_${index + 1}_lorentzian_gamma_hwhm,${cell(peak.width)}`,
+        `# fitted_peak_${index + 1}_lorentzian_fwhm,${cell(2 * peak.width)}`,
+        `# fitted_peak_${index + 1}_gaussian_hwhm,${cell(peakGaussianHwhm(peak))}`,
+        `# fitted_peak_${index + 1}_gaussian_fwhm,${cell(gaussianHwhmToFwhm(peakGaussianHwhm(peak)))}`,
+        `# fitted_peak_${index + 1}_gaussian_sigma,${cell(gaussianHwhmToSigma(peakGaussianHwhm(peak)))}`,
         `# fitted_peak_${index + 1}_phase_${phaseUnit},${formatPhaseForUnit(peak.phase, phaseUnit)}`,
       ]),
       ...idealPeaks.flatMap((peak, index) => [
         `# ideal_peak_${index + 1}_profile,${cell(peak.profile_type ?? 'lorentzian')}`,
         `# ideal_peak_${index + 1}_amplitude,${cell(peak.amplitude)}`,
         `# ideal_peak_${index + 1}_center,${cell(peak.center)}`,
-        `# ideal_peak_${index + 1}_linewidth,${cell(peak.width)}`,
+        `# ideal_peak_${index + 1}_lorentzian_gamma_hwhm,${cell(peak.width)}`,
+        `# ideal_peak_${index + 1}_lorentzian_fwhm,${cell(2 * peak.width)}`,
+        `# ideal_peak_${index + 1}_gaussian_hwhm,${cell(peakGaussianHwhm(peak))}`,
+        `# ideal_peak_${index + 1}_gaussian_fwhm,${cell(gaussianHwhmToFwhm(peakGaussianHwhm(peak)))}`,
+        `# ideal_peak_${index + 1}_gaussian_sigma,${cell(gaussianHwhmToSigma(peakGaussianHwhm(peak)))}`,
         `# ideal_peak_${index + 1}_phase_${phaseUnit},${formatPhaseForUnit(peak.phase, phaseUnit)}`,
       ]),
       'frequency,Re_fitted,Im_fitted,Re_reference_on_fitted_grid,Im_reference_on_fitted_grid,Re_residual,Im_residual,intensity_fitted,intensity_reference_on_fitted_grid,intensity_residual,complex_residual_magnitude',
@@ -554,17 +570,26 @@ export default function FittingAnalysisPage() {
                   />
                   <InputNumber addonBefore="A" value={peak.amplitude} onChange={(value) => value != null && setPeaks(peaks.map((item, i) => i === index ? { ...item, amplitude: value } : item))} step={0.1} style={{ width: '100%' }} size="small" />
                   <InputNumber addonBefore="Omega" value={peak.center} onChange={(value) => value != null && setPeaks(peaks.map((item, i) => i === index ? { ...item, center: value } : item))} step={1} style={{ width: '100%' }} size="small" />
-                  <InputNumber addonBefore="L HWHM" value={peak.width} onChange={(value) => value != null && setPeaks(peaks.map((item, i) => i === index ? { ...item, width: value } : item))} step={0.5} min={0.1} style={{ width: '100%' }} size="small" />
+                  <InputNumber addonBefore="L Gamma (HWHM)" value={peak.width} onChange={(value) => value != null && setPeaks(peaks.map((item, i) => i === index ? { ...item, width: value } : item))} step={0.5} min={0.1} style={{ width: '100%' }} size="small" />
                   <InputNumber
-                    addonBefore="G FWHM"
-                    value={peak.gaussian_fwhm ?? 0}
+                    addonBefore="G HWHM"
+                    value={peakGaussianHwhm(peak)}
                     disabled={(peak.profile_type ?? 'lorentzian') === 'lorentzian'}
-                    onChange={(value) => value != null && setPeaks(peaks.map((item, i) => i === index ? { ...item, gaussian_fwhm: value } : item))}
+                    onChange={(value) => value != null && setPeaks(peaks.map((item, i) => i === index ? { ...item, gaussian_hwhm: value } : item))}
                     step={0.5}
                     min={0}
                     style={{ width: '100%' }}
                     size="small"
                   />
+                  {(peak.profile_type ?? 'lorentzian') === 'voigt' && (
+                    <div style={{ color: '#8c8c8c', fontSize: 12, lineHeight: 1.45 }}>
+                      {peakWidthSummaryLines(peak).map((line) => (
+                        <div key={line.label}>
+                          {line.label}: {line.value}{line.note ? ` (${line.note})` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <InputNumber
                     addonBefore={`Phase (${phaseUnitSymbol(phaseUnit)})`}
                     value={phaseToDisplay(peak.phase, phaseUnit)}
@@ -591,7 +616,7 @@ export default function FittingAnalysisPage() {
     if (alignedIdeal?.aligned) {
       traces.push({ x: safeArr(fittedResult.wavenumbers), y: safeArr(alignedIdeal.aligned.real), type: 'scatter', mode: 'lines', name: `${activeIdealLabel} Re[chi]`, line: { color: '#c0392b', width: 1.5, dash: 'dash' } })
     }
-    Plotly.newPlot(container, traces, {
+    return plotWhenReady(container, traces, {
       title: { text: 'Re Comparison: fitted vs reference', font: { size: 14 } },
       xaxis: { title: 'Wavenumber (cm<sup>-1</sup>)' },
       yaxis: { title: 'Re[chi]' },
@@ -599,7 +624,6 @@ export default function FittingAnalysisPage() {
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
     }, { displayModeBar: true, displaylogo: false, scrollZoom: true })
-    return () => Plotly.purge(container)
   }, [fittedResult, alignedIdeal, activeIdealLabel])
 
   useEffect(() => {
@@ -611,7 +635,7 @@ export default function FittingAnalysisPage() {
     if (alignedIdeal?.aligned) {
       traces.push({ x: safeArr(fittedResult.wavenumbers), y: safeArr(alignedIdeal.aligned.imag), type: 'scatter', mode: 'lines', name: `${activeIdealLabel} Im[chi]`, line: { color: '#2471a3', width: 1.5, dash: 'dash' } })
     }
-    Plotly.newPlot(container, traces, {
+    return plotWhenReady(container, traces, {
       title: { text: 'Im Comparison: fitted vs reference', font: { size: 14 } },
       xaxis: { title: 'Wavenumber (cm<sup>-1</sup>)' },
       yaxis: { title: 'Im[chi]' },
@@ -619,14 +643,13 @@ export default function FittingAnalysisPage() {
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
     }, { displayModeBar: true, displaylogo: false, scrollZoom: true })
-    return () => Plotly.purge(container)
   }, [fittedResult, alignedIdeal, activeIdealLabel])
 
   useEffect(() => {
     const container = residualRef.current
     if (!container || !fittedResult || !residual) return
     const w = safeArr(fittedResult.wavenumbers)
-    Plotly.newPlot(container, [
+    return plotWhenReady(container, [
       { x: w, y: safeArr(residual.re), type: 'scatter', mode: 'lines', name: 'Re residual', line: { color: '#c0392b', width: 1.8 } },
       { x: w, y: safeArr(residual.im), type: 'scatter', mode: 'lines', name: 'Im residual', line: { color: '#2471a3', width: 1.8 } },
       { x: [w[0], w[w.length - 1]], y: [0, 0], type: 'scatter', mode: 'lines', name: 'Zero baseline', line: { color: '#777', width: 1, dash: 'dot' } },
@@ -638,7 +661,6 @@ export default function FittingAnalysisPage() {
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
     }, { displayModeBar: true, displaylogo: false, scrollZoom: true })
-    return () => Plotly.purge(container)
   }, [fittedResult, residual])
 
   useEffect(() => {
@@ -650,7 +672,7 @@ export default function FittingAnalysisPage() {
     if (alignedIntensity?.aligned) {
       traces.push({ x: safeArr(fittedResult.wavenumbers), y: safeArr(alignedIntensity.aligned.values), type: 'scatter', mode: 'lines', name: activeIntensityLabel, line: { color: '#16a085', width: 1.7, dash: 'dash' } })
     }
-    Plotly.newPlot(container, traces, {
+    return plotWhenReady(container, traces, {
       title: { text: 'Intensity Comparison: fitted vs reference', font: { size: 14 } },
       xaxis: { title: 'Wavenumber (cm<sup>-1</sup>)' },
       yaxis: { title: '|chi|^2' },
@@ -658,7 +680,6 @@ export default function FittingAnalysisPage() {
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
     }, { displayModeBar: true, displaylogo: false, scrollZoom: true })
-    return () => Plotly.purge(container)
   }, [fittedResult, alignedIntensity, activeIntensityLabel])
 
   return (

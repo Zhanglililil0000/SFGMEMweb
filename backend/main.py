@@ -57,7 +57,13 @@ def collect_sfg_peak_parameters(peaks: List[dict]):
     peak_options = []
     for peak in peaks:
         profile_type = str(peak.get("profile_type", "lorentzian")).lower()
-        gaussian_fwhm = float(peak.get("gaussian_fwhm", 0.0))
+        gaussian_hwhm_value = peak.get("gaussian_hwhm")
+        if gaussian_hwhm_value is not None:
+            gaussian_hwhm = float(gaussian_hwhm_value)
+            gaussian_fwhm = 2.0 * gaussian_hwhm
+        else:
+            gaussian_fwhm = float(peak.get("gaussian_fwhm", 0.0))
+            gaussian_hwhm = gaussian_fwhm / 2.0
         raw_params.extend([
             float(peak.get("amplitude", 1.0)),
             float(peak.get("center", 3000.0)),
@@ -66,6 +72,7 @@ def collect_sfg_peak_parameters(peaks: List[dict]):
         phases.append(float(peak.get("phase", 0.0)))
         peak_options.append({
             "profile_type": profile_type,
+            "gaussian_hwhm": gaussian_hwhm,
             "gaussian_fwhm": gaussian_fwhm,
         })
     return raw_params, phases, peak_options

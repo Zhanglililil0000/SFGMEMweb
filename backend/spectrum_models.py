@@ -11,7 +11,7 @@ def complex_voigt(wavenumbers, center, lorentzian_hwhm, gaussian_fwhm):
     """
     Complex Voigt response from Gaussian broadening of the complex Lorentzian.
 
-    Gaussian width is entered as FWHM and converted to sigma internally.
+    Gaussian width is converted to FWHM before this call, then to sigma here.
     This convolves the complex response, not the final intensity |chi|^2.
     As gaussian_fwhm -> 0, the result reduces to complex_lorentzian.
     """
@@ -32,7 +32,10 @@ def compute_peak_response(wavenumbers, peak):
     center = float(peak.get("center", 3000.0))
     lorentzian_hwhm = float(peak.get("width", 10.0))
     phase = float(peak.get("phase", 0.0))
-    gaussian_fwhm = float(peak.get("gaussian_fwhm", 0.0))
+    if peak.get("gaussian_hwhm") is not None:
+        gaussian_fwhm = 2.0 * float(peak.get("gaussian_hwhm", 0.0))
+    else:
+        gaussian_fwhm = float(peak.get("gaussian_fwhm", 0.0))
 
     if lorentzian_hwhm <= 0:
         raise ValueError("Lorentzian HWHM Gamma must be greater than 0")

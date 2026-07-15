@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import 'plotly.js/dist/plotly.min.js'
 import { Row, Col, Card, InputNumber, Button, Switch, Typography, message, Space, Divider, Alert, Upload, Select } from 'antd'
 import { DownloadOutlined, PlusOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons'
 import * as api from '../api/mem'
@@ -17,8 +16,14 @@ import {
   parseParameterFields,
 } from '../utils/phaseUnit'
 import { buildImportedPeak, importedPeakIndices, normalizeProfileType, profileTypeOptions } from '../utils/sfgPeakParams'
+import {
+  gaussianHwhmToFwhm,
+  gaussianHwhmToSigma,
+  peakGaussianHwhm,
+  peakWidthSummaryLines,
+} from '../utils/lineShapeWidths'
+import { ensurePlotly, purgePlot } from '../utils/plotlyLoader'
 
-const Plotly = window.Plotly
 const { Text } = Typography
 
 const chartConfig = {
@@ -29,7 +34,7 @@ const chartConfig = {
 }
 
 function emptyPeak(): SfgPeakParams {
-  return { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_fwhm: 0 }
+  return { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_hwhm: 0 }
 }
 
 function csvCell(value: number | string): string {
@@ -44,8 +49,8 @@ export default function SfgGeneratorPage() {
   const [nrReal, setNrReal] = useState(0.0)
   const [nrImag, setNrImag] = useState(0.0)
   const [peaks, setPeaks] = useState<SfgPeakParams[]>([
-    { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_fwhm: 0 },
-    { amplitude: 0.8, center: 3400, width: 15, phase: 0, profile_type: 'lorentzian', gaussian_fwhm: 0 },
+    { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_hwhm: 0 },
+    { amplitude: 0.8, center: 3400, width: 15, phase: 0, profile_type: 'lorentzian', gaussian_hwhm: 0 },
   ])
   const [phaseUnit, setPhaseUnit] = useState<PhaseUnit>('degrees')
   const [showSubpeaks, setShowSubpeaks] = useState(false)
@@ -59,7 +64,7 @@ export default function SfgGeneratorPage() {
 
   const safeArr = useCallback((arr: number[]): number[] => arr.map((v) => (Number.isFinite(v) ? v : 0)), [])
 
-  const drawCharts = useCallback((data: SfgResult, sub: boolean) => {
+  const drawCharts = useCallback(async (data: SfgResult, sub: boolean) => {
     const w = safeArr(data.wavenumbers)
     const subColors = ['#9E9E9E', '#FF9800', '#E040FB', '#00BCD4', '#8BC34A', '#F44336', '#3F51B5', '#795548', '#607D8B', '#CDDC39', '#FF5722']
 
@@ -97,13 +102,14 @@ export default function SfgGeneratorPage() {
       showlegend: sub,
     })
 
+    const Plotly = await ensurePlotly()
     if (intensityRef.current) Plotly.newPlot(intensityRef.current, intensityTraces, baseLayout('Intensity |chi(omega)|^2', '|chi|^2'), chartConfig)
     if (realRef.current) Plotly.newPlot(realRef.current, realTraces, baseLayout('Real Part Re[chi(omega)]', 'Re[chi]'), chartConfig)
     if (imagRef.current) Plotly.newPlot(imagRef.current, imagTraces, baseLayout('Imaginary Part Im[chi(omega)]', 'Im[chi]'), chartConfig)
   }, [safeArr])
 
   useEffect(() => {
-    if (result) drawCharts(result, showSubpeaks)
+    if (result) void drawCharts(result, showSubpeaks)
   }, [showSubpeaks, result, drawCharts])
 
   const handlePlot = async () => {
@@ -114,8 +120,8 @@ export default function SfgGeneratorPage() {
     try {
       const data = await api.generateSfg({ xmin, xmax, npoints, nr_real: nrReal, nr_imag: nrImag, peaks })
       setResult(data)
-      ;[intensityRef, realRef, imagRef].forEach((r) => { if (r.current) Plotly.purge(r.current) })
-      setTimeout(() => drawCharts(data, showSubpeaks), 50)
+      ;[intensityRef, realRef, imagRef].forEach((r) => purgePlot(r.current))
+      setTimeout(() => { void drawCharts(data, showSubpeaks) }, 50)
     } catch (e: unknown) {
       setError(api.getApiErrorMessage(e))
     } finally { setLoading(false) }
@@ -191,6 +197,7 @@ export default function SfgGeneratorPage() {
     ]
     peaks.forEach((peak, index) => {
       const n = index + 1
+      const gaussianHwhm = peakGaussianHwhm(peak)
       lines.push(
         `Profile${n}=${peak.profile_type ?? 'lorentzian'}`,
         `A${n}=${formatParameterNumber(peak.amplitude)}`,
@@ -198,7 +205,9 @@ export default function SfgGeneratorPage() {
         `Gamma${n}=${formatParameterNumber(peak.width)}`,
         `Lorentzian_HWHM${n}=${formatParameterNumber(peak.width)}`,
         `Lorentzian_FWHM${n}=${formatParameterNumber(2 * peak.width)}`,
-        `Gaussian_FWHM${n}=${formatParameterNumber(peak.gaussian_fwhm ?? 0)}`,
+        `Gaussian_HWHM${n}=${formatParameterNumber(gaussianHwhm)}`,
+        `Gaussian_FWHM${n}=${formatParameterNumber(gaussianHwhmToFwhm(gaussianHwhm))}`,
+        `Gaussian_sigma${n}=${formatParameterNumber(gaussianHwhmToSigma(gaussianHwhm))}`,
         `Phi${n}=${formatPhaseForUnit(peak.phase, phaseUnit)}`,
       )
     })
@@ -211,9 +220,9 @@ export default function SfgGeneratorPage() {
   }
 
   return (
-    <Row gutter={16} style={{ marginTop: 0 }}>
+    <Row className="sfg-generator-page" gutter={[16, 16]} style={{ marginTop: 0 }}>
       <Col xs={24} lg={7}>
-        <Card size="small" title="Parameters" style={{ height: 'calc(100vh - 100px)', overflow: 'auto' }}>
+        <Card className="sfg-parameter-card" size="small" title="Parameters">
           <Text strong>Wavenumber Range</Text>
           <Space wrap style={{ marginTop: 4 }}>
             <InputNumber addonBefore="Start" value={xmin} onChange={(v) => setXmin(v ?? 0)} style={{ width: 140 }} />
@@ -253,7 +262,7 @@ export default function SfgGeneratorPage() {
             Phi display, manual input, parameter import and parameter export use this unit; backend calculation uses radians.
           </Text>
           <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
-            Lorentzian width uses the original Gamma convention: HWHM. Gaussian broadening uses FWHM and only applies to Voigt peaks.
+            Lorentzian Gamma is HWHM. Gaussian broadening input uses HWHM for Voigt peaks; FWHM and sigma are derived from it.
           </Text>
           {peaks.map((p, i) => (
             <Card key={i} size="small" style={{ marginTop: 8 }} title={<Text style={{ fontSize: 13 }}>Peak {i + 1}</Text>} extra={
@@ -270,16 +279,25 @@ export default function SfgGeneratorPage() {
                 />
                 <InputNumber addonBefore="Amplitude" value={p.amplitude} onChange={(v) => updatePeak(i, 'amplitude', v)} step={0.1} style={{ width: 180 }} />
                 <InputNumber addonBefore="Center" value={p.center} onChange={(v) => updatePeak(i, 'center', v)} step={1} style={{ width: 180 }} />
-                <InputNumber addonBefore="Lorentzian HWHM" value={p.width} onChange={(v) => updatePeak(i, 'width', v)} step={0.5} min={0.1} style={{ width: 180 }} />
+                <InputNumber addonBefore="L Gamma (HWHM)" value={p.width} onChange={(v) => updatePeak(i, 'width', v)} step={0.5} min={0.1} style={{ width: 180 }} />
                 <InputNumber
-                  addonBefore="Gaussian FWHM"
-                  value={p.gaussian_fwhm ?? 0}
-                  onChange={(v) => updatePeak(i, 'gaussian_fwhm', v)}
+                  addonBefore="Gaussian HWHM"
+                  value={peakGaussianHwhm(p)}
+                  onChange={(v) => updatePeak(i, 'gaussian_hwhm', v)}
                   step={0.5}
                   min={0}
                   disabled={(p.profile_type ?? 'lorentzian') === 'lorentzian'}
                   style={{ width: 180 }}
                 />
+                {(p.profile_type ?? 'lorentzian') === 'voigt' && (
+                  <div style={{ color: '#8c8c8c', fontSize: 12, lineHeight: 1.45 }}>
+                    {peakWidthSummaryLines(p).map((line) => (
+                      <div key={line.label}>
+                        {line.label}: {line.value}{line.note ? ` (${line.note})` : ''}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <InputNumber
                   addonBefore={`Phase (${phaseUnitSymbol(phaseUnit)})`}
                   value={phaseToDisplay(p.phase, phaseUnit)}
@@ -302,9 +320,9 @@ export default function SfgGeneratorPage() {
         </Card>
       </Col>
       <Col xs={24} lg={17}>
-        <div ref={intensityRef} style={{ width: '100%', height: '30vh', minHeight: 250, background: '#fff', borderRadius: 8, marginBottom: 8 }} />
-        <div ref={realRef} style={{ width: '100%', height: '30vh', minHeight: 250, background: '#fff', borderRadius: 8, marginBottom: 8 }} />
-        <div ref={imagRef} style={{ width: '100%', height: '30vh', minHeight: 250, background: '#fff', borderRadius: 8 }} />
+        <div ref={intensityRef} className="sfg-chart-panel" />
+        <div ref={realRef} className="sfg-chart-panel" />
+        <div ref={imagRef} className="sfg-chart-panel sfg-chart-panel-last" />
       </Col>
     </Row>
   )

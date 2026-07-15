@@ -1,9 +1,10 @@
-import { useState } from 'react'
-import { Layout, Typography, Tabs } from 'antd'
-import MemAnalyzerPage from './pages/MemAnalyzerPage'
-import MemVsFittingPage from './pages/MemVsFittingPage'
-import SfgGeneratorPage from './pages/SfgGeneratorPage'
-import FittingAnalysisPage from './pages/FittingAnalysisPage'
+import { lazy, Suspense, useState } from 'react'
+import { Layout, Typography, Tabs, Spin } from 'antd'
+
+const MemAnalyzerPage = lazy(() => import('./pages/MemAnalyzerPage'))
+const MemVsFittingPage = lazy(() => import('./pages/MemVsFittingPage'))
+const SfgGeneratorPage = lazy(() => import('./pages/SfgGeneratorPage'))
+const FittingAnalysisPage = lazy(() => import('./pages/FittingAnalysisPage'))
 
 const { Header, Content } = Layout
 const { Text } = Typography
@@ -58,10 +59,12 @@ function App() {
       </Header>
 
       <Content style={{ padding: '16px 24px', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
-        {activeTab === 'mem' && <MemAnalyzerPage />}
-        {activeTab === 'fitting' && <MemVsFittingPage />}
-        {activeTab === 'sfg' && <SfgGeneratorPage />}
-        {activeTab === 'fitting-analysis' && <FittingAnalysisPage />}
+        <Suspense fallback={<div style={{ padding: 40, textAlign: 'center' }}><Spin /></div>}>
+          {activeTab === 'mem' && <MemAnalyzerPage />}
+          {activeTab === 'fitting' && <MemVsFittingPage />}
+          {activeTab === 'sfg' && <SfgGeneratorPage />}
+          {activeTab === 'fitting-analysis' && <FittingAnalysisPage />}
+        </Suspense>
       </Content>
     </Layout>
   )

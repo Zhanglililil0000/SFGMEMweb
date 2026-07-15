@@ -67,6 +67,7 @@ export interface SfgPeakParams {
   width: number
   phase: number
   profile_type?: 'lorentzian' | 'voigt'
+  gaussian_hwhm?: number
   gaussian_fwhm?: number
 }
 

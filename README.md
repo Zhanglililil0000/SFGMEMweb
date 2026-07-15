@@ -110,7 +110,7 @@ cd backend && python main.py           # 访问 :8000
 
 | 功能 | 说明 |
 |------|------|
-| 参数面板 | 波数范围、NR 实部/虚部、动态峰参数（线形/振幅/中心/Lorentzian HWHM/Gaussian FWHM/相位） |
+| 参数面板 | 波数范围、NR 实部/虚部、动态峰参数（线形/振幅/中心/Lorentzian Gamma HWHM/Gaussian HWHM/相位） |
 | 文件导入 | 支持 `.txt` / `.csv` peak parameter file 批量导入 `A{n}/Omega{n}/Gamma{n}/Phi{n}` 参数；缺少线形字段时默认 Lorentzian |
 | 三图显示 | 强度、实部、虚部 — 各自上下排列 |
 | 子峰叠加 | 开关控制是否用虚线显示各峰分量 |
@@ -125,16 +125,16 @@ Profile1=lorentzian
 A1=1
 Omega1=2990
 Gamma1=3
-Gaussian_FWHM1=0
+Gaussian_HWHM1=0
 Phi1=90
 Profile2=voigt
 A2=2
 Omega2=2950
 Gamma2=4
-Gaussian_FWHM2=12
+Gaussian_HWHM2=6
 ```
 
-`Profile`、`Gaussian_FWHM` 和 `Phi` 行可选，缺失时分别默认为 `lorentzian`、`0` 和 `0`。以 `#` 开头的行为注释。旧格式文件只含 `A{n}/Omega{n}/Gamma{n}/Phi{n}` 时仍按 Lorentzian 导入。
+`Profile`、`Gaussian_HWHM` 和 `Phi` 行可选，缺失时分别默认为 `lorentzian`、`0` 和 `0`。以 `#` 开头的行为注释。旧格式文件只含 `A{n}/Omega{n}/Gamma{n}/Phi{n}` 时仍按 Lorentzian 导入。旧版参数文件中的 `Gaussian_FWHM` 仍可导入，程序会自动换算为 `Gaussian_HWHM = Gaussian_FWHM / 2`；也可导入 `Gaussian_sigma`，程序会换算为对应 HWHM。
 
 ### Lorentzian and Voigt peak profiles / 峰线形
 
@@ -155,13 +155,24 @@ w(z) = exp(-z^2) erfc(-i z)
 程序实现的是 **complex Voigt response**，即 Gaussian 非均匀展宽作用在复 Lorentzian 响应上，而不是只返回实数强度线形的 Voigt profile。代码中的定义为：
 
 ```
-sigma = Gaussian_FWHM / (2 sqrt(2 ln 2))
+Gaussian_FWHM = 2 * Gaussian_HWHM
+sigma = Gaussian_HWHM / sqrt(2 ln 2)
 z = (omega - omega_q + i Gamma_q) / (sigma sqrt(2))
 V_complex(omega) = i sqrt(pi) wofz(z) / (sigma sqrt(2))
 chi_q(omega) = A_q exp(i phi_q) V_complex(omega)
 ```
 
-其中 `Gamma` / `width` / `Γ_q` 仍是 Lorentzian HWHM，`Gaussian_FWHM` 在 GUI 和参数文件中使用 FWHM，内部再转换为 `sigma`。程序不会对最终强度 `|χ|^2` 做卷积；总强度始终由总复响应计算：
+其中 `Gamma` / `width` / `Γ_q` 仍是 Lorentzian HWHM（半宽）。`Gaussian_HWHM` 是 GUI 和新参数文件中的 Voigt Gaussian 半宽输入；程序一键可显示对应 `Gaussian_FWHM = 2 * Gaussian_HWHM` 与 `sigma = Gaussian_HWHM / sqrt(2 ln 2)`，并会在 Voigt peak 面板中逐行显示非重复的派生宽度：Lorentzian FWHM、Gaussian FWHM、Gaussian sigma、近似 Voigt HWHM/FWHM 和 Voigt equivalent Gaussian sigma。Voigt 宽度显示使用 Olivero-Longbothum 近似：
+
+```
+Voigt_FWHM ≈ 0.5346 * Lorentzian_FWHM
+              + sqrt(0.2166 * Lorentzian_FWHM^2 + Gaussian_FWHM^2)
+Voigt_HWHM = Voigt_FWHM / 2
+```
+
+该显示值只是组合线宽的近似读数，不改变 complex Voigt response 的计算定义。程序不会对最终强度 `|χ|^2` 做卷积；总强度始终由总复响应计算：
+
+注意：Lorentzian 分布的严格标准差不存在；只要 Voigt 含有非零 Lorentzian 分量，严格标准差也不存在。因此 GUI 不显示这些 undefined 项，只给出从近似 Voigt FWHM 折算的 `Voigt equivalent Gaussian sigma`，仅作为宽度量级参考。
 
 ```
 Intensity(ω) = |χ_NR + Σχ_q(ω)|^2
@@ -169,7 +180,7 @@ Intensity(ω) = |χ_NR + Σχ_q(ω)|^2
 
 SFG Generator 的 GUI 图线、绘图数据和 CSV 导出直接使用后端返回的同一组 `intensity` 数组；程序不会对 `χ(ω)` 或 `Intensity(ω)` 做最大值归一化、额外 scale factor、除以 10/100，或任何单独的 display scaling。
 
-当 `Profile=voigt` 且 `Gaussian_FWHM=0` 时，`complex_voigt()` 会直接退化为原来的 Lorentzian 复响应。
+当 `Profile=voigt` 且 `Gaussian_HWHM=0` 时，`complex_voigt()` 会直接退化为原来的 Lorentzian 复响应。
 
 ### Phase unit for Phi import/export / Phi 相位单位
 
@@ -473,7 +484,7 @@ NRMSE_Im,window(φ) = RMSE(r_Im(φ) in selected window) / RMS(Im_reference in se
 | `npoints` | int | 数据点数（10 ~ 10000） |
 | `nr_real` | float | NR 实部 |
 | `nr_imag` | float | NR 虚部 |
-| `peaks` | list | 峰参数，每项含 `profile_type`, `amplitude`, `center`, `width`, `gaussian_fwhm`, `phase`；`width` 为 Lorentzian HWHM |
+| `peaks` | list | 峰参数，每项含 `profile_type`, `amplitude`, `center`, `width`, `gaussian_hwhm`, `phase`；`width` 为 Lorentzian Gamma HWHM，`gaussian_hwhm` 为 Voigt Gaussian HWHM。后端仍兼容旧字段 `gaussian_fwhm` |
 
 响应：
 
@@ -638,7 +649,7 @@ RMSE divided by RMS amplitude of the corresponding reference spectrum
 导出 metadata 还会记录完整光谱范围、用户设定的窗口范围、实际用于计算的有效窗口范围、full-range optimal phase 和 windowed optimal phase。
 
 SFG Generator 导出包含总谱与各子峰分量。SFG Generator 和 MEM vs Fitting 的 peak parameter 导出文件会按当前 `Phase unit` 输出 `Phi`，并在文件注释中写明 `Phase unit: degrees` 或 `Phase unit: radians`。
-SFG Generator 的 spectrum CSV 会对包含逗号的列名（例如 Voigt 子峰标签中的 `L HWHM` / `G FWHM` 描述）进行标准 CSV quoting；MEM 导入也兼容旧版本未加引号的 Voigt 子峰表头，只要第一列波数和所选强度列有效即可。
+SFG Generator 的 spectrum CSV 会对包含逗号的列名（例如 Voigt 子峰标签中的 `L HWHM` / `G HWHM` 描述）进行标准 CSV quoting；MEM 导入也兼容旧版本未加引号的 `G FWHM` Voigt 子峰表头，只要第一列波数和所选强度列有效即可。
 
 ## MEM 算法
 
@@ -659,8 +670,8 @@ SFG Generator 的 spectrum CSV 会对包含逗号的列名（例如 Voigt 子峰
 | `NR_Real`, `NR_Imag` | 非共振复振幅 |
 | `A_q` | 第 q 峰的振幅 |
 | `ω_q` | 第 q 峰的中心波数 |
-| `Γ_q` | 第 q 峰的 Lorentzian HWHM（半高半宽）；Lorentzian FWHM = `2Γ_q` |
-| `Gaussian_FWHM_q` | Voigt 峰的 Gaussian FWHM；Lorentzian 峰忽略该值 |
+| `Γ_q` | 第 q 峰的 Lorentzian Gamma HWHM（半高半宽）；Lorentzian FWHM = `2Γ_q` |
+| `Gaussian_HWHM_q` | Voigt 峰的 Gaussian HWHM（半高半宽）；Lorentzian 峰忽略该值。Gaussian FWHM = `2 * Gaussian_HWHM_q`，sigma = `Gaussian_HWHM_q / sqrt(2 ln 2)` |
 | `φ_q` | 第 q 峰的相位（后端内部使用 rad；GUI 中 `Phi` 可由 `Phase unit` 选择 degrees 或 radians，默认 degrees） |
 
 Voigt 峰通过 `scipy.special.wofz` 计算 Faddeeva function，并由此得到 complex Voigt response：`V_complex(ω) = i sqrt(pi) wofz(z) / (sigma sqrt(2))`。强度 = |χ(ω)|²，实部 = Re[χ]，虚部 = Im[χ]。

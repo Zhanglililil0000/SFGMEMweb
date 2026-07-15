@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import 'plotly.js/dist/plotly.min.js'
 import {
   Row, Col, Card, InputNumber, Button, Typography, message, Space,
   Alert, Upload, Select, Slider, Empty, Switch, Checkbox,
@@ -23,6 +22,12 @@ import {
 } from '../utils/phaseUnit'
 import { buildImportedPeak, importedPeakIndices, normalizeProfileType, profileTypeOptions } from '../utils/sfgPeakParams'
 import {
+  gaussianHwhmToFwhm,
+  gaussianHwhmToSigma,
+  peakGaussianHwhm,
+  peakWidthSummaryLines,
+} from '../utils/lineShapeWidths'
+import {
   NRMSE_EPSILON,
   alignReferenceToGrid,
   autoDetectReferenceColumns,
@@ -32,8 +37,8 @@ import {
   type ReferenceSpectrum,
   type ReferenceTable,
 } from '../utils/referenceSpectrum'
+import { ensurePlotly, plotWhenReady, purgePlot } from '../utils/plotlyLoader'
 
-const Plotly = window.Plotly
 const { Text } = Typography
 
 const DEFAULT_PHASE_SCAN_START_DEG = 0
@@ -51,7 +56,7 @@ const chartConfig = {
 }
 
 function emptyPeak(): SfgPeakParams {
-  return { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_fwhm: 0 }
+  return { amplitude: 1.0, center: 3200, width: 10, phase: 0, profile_type: 'lorentzian', gaussian_hwhm: 0 }
 }
 
 function safeArr(arr: number[]): number[] {
@@ -544,7 +549,8 @@ export default function MemVsFittingPage() {
   }, [activeReference, evaluationIndices])
 
   useEffect(() => {
-    if (!result || !activeReference || !activeReferenceEval || !currentRotatedEval || !comparisonRef.current) return
+    const container = comparisonRef.current
+    if (!result || !activeReference || !activeReferenceEval || !currentRotatedEval || !container) return
     const w = safeArr(evaluationWavenumbers)
     const rot = currentRotatedEval
     const traces = [
@@ -553,7 +559,7 @@ export default function MemVsFittingPage() {
       { x: w, y: safeArr(rot.imag), type: 'scatter', mode: 'lines', name: 'MEM Im[chi]', line: { color: '#3498db', width: 2 } },
       { x: w, y: safeArr(activeReferenceEval.imag), type: 'scatter', mode: 'lines', name: `${activeReference.label} Im[chi]`, line: { color: '#3498db', width: 1.5, dash: 'dash' } },
     ]
-    Plotly.newPlot(comparisonRef.current, traces, {
+    return plotWhenReady(container, traces, {
       title: {
         text: `MEM reconstruction at error phase = ${selectedPhaseDeg.toFixed(2)}\u00b0 (${displayedPhaseAngle.toFixed(6)} rad)<br><sup>Selection: ${currentSelectionLabel}; reference: ${activeReference.label}; residual/NRMSE only over ${result.evaluation_frequency_range[0]}-${result.evaluation_frequency_range[1]} cm^-1</sup>`,
         font: { size: 14 },
@@ -567,7 +573,8 @@ export default function MemVsFittingPage() {
   }, [result, activeReference, activeReferenceEval, currentRotatedEval, evaluationWavenumbers, selectedPhaseDeg, displayedPhaseAngle, currentSelectionLabel])
 
   useEffect(() => {
-    if (!result || !activeReference || !activeReferenceEval || !intensityRef.current) return
+    const container = intensityRef.current
+    if (!result || !activeReference || !activeReferenceEval || !container) return
     const originalW = safeArr(result.original_wavenumbers)
     const memW = safeArr(result.mem_wavenumbers)
     const traces: PlotlyTrace[] = [
@@ -601,7 +608,7 @@ export default function MemVsFittingPage() {
         { type: 'line', xref: 'x', yref: 'paper', x0: originalEnd, x1: originalEnd, y0: 0, y1: 1, line: { color: '#666', width: 1, dash: 'dot' } },
       )
     }
-    Plotly.newPlot(intensityRef.current, traces, {
+    return plotWhenReady(container, traces, {
       title: { text: `Intensity Comparison: Import vs ${activeReference.source === 'external_reference' ? 'External Re/Im Reference' : 'Peak-parameter Ideal'}<br><sup>Original/evaluation range: ${result.evaluation_frequency_range[0]}-${result.evaluation_frequency_range[1]} cm^-1${result.edge_padding_enabled ? '; shaded regions are edge padding' : ''}</sup>`, font: { size: 14 } },
       xaxis: { title: 'Wavenumber (cm<sup>-1</sup>)' },
       yaxis: { title: '|chi|^2' },
@@ -698,14 +705,14 @@ export default function MemVsFittingPage() {
       line: { color: '#999', width: 1, dash: 'dash' },
       showlegend: false,
     })
-    Plotly.newPlot(nrmseContainer, traces, {
+    const layout = {
       title: { text: `${phaseScanData.fullRangeLabel} and Selected window NRMSE vs Error Phase<br><sup>Reference: ${phaseScanData.referenceLabel}; NRMSE evaluated only over original range ${phaseScanData.fullRange[0]}-${phaseScanData.fullRange[1]} cm^-1</sup>`, font: { size: 14 } },
       xaxis: { title: 'Error phase (\u00b0)', range: [Math.min(...phaseScanData.phaseDeg), Math.max(...phaseScanData.phaseDeg)] },
       yaxis: { title: 'NRMSE' },
       hovermode: 'x',
       margin: { l: 60, r: 20, t: 50, b: 45 },
       legend: { x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
-    }, chartConfig)
+    }
     const onClick = (eventData: PlotlyClickEvent) => {
       const rawX = eventData.points?.[0]?.x
       const x = typeof rawX === 'number' ? rawX : Number(rawX)
@@ -714,9 +721,24 @@ export default function MemVsFittingPage() {
         setPhaseSelectionMode('manual')
       }
     }
-    nrmseContainer.on?.('plotly_click', onClick)
+    let cancelled = false
+    void ensurePlotly()
+      .then(async (Plotly) => {
+        if (cancelled) return
+        await Plotly.newPlot(nrmseContainer, traces, layout, chartConfig)
+        if (cancelled) {
+          purgePlot(nrmseContainer)
+          return
+        }
+        nrmseContainer.on?.('plotly_click', onClick)
+      })
+      .catch((error) => {
+        if (!cancelled) console.error('Unable to load Plotly', error)
+      })
     return () => {
+      cancelled = true
       nrmseContainer.removeAllListeners?.('plotly_click')
+      purgePlot(nrmseContainer)
     }
   }, [phaseScanData, selectedPhaseDeg, result])
 
@@ -777,6 +799,7 @@ export default function MemVsFittingPage() {
     ]
     peaks.forEach((peak, index) => {
       const n = index + 1
+      const gaussianHwhm = peakGaussianHwhm(peak)
       lines.push(
         `Profile${n}=${peak.profile_type ?? 'lorentzian'}`,
         `A${n}=${formatParameterNumber(peak.amplitude)}`,
@@ -784,7 +807,9 @@ export default function MemVsFittingPage() {
         `Gamma${n}=${formatParameterNumber(peak.width)}`,
         `Lorentzian_HWHM${n}=${formatParameterNumber(peak.width)}`,
         `Lorentzian_FWHM${n}=${formatParameterNumber(2 * peak.width)}`,
-        `Gaussian_FWHM${n}=${formatParameterNumber(peak.gaussian_fwhm ?? 0)}`,
+        `Gaussian_HWHM${n}=${formatParameterNumber(gaussianHwhm)}`,
+        `Gaussian_FWHM${n}=${formatParameterNumber(gaussianHwhmToFwhm(gaussianHwhm))}`,
+        `Gaussian_sigma${n}=${formatParameterNumber(gaussianHwhmToSigma(gaussianHwhm))}`,
         `Phi${n}=${formatPhaseForUnit(peak.phase, phaseUnit)}`,
       )
     })
@@ -870,13 +895,13 @@ export default function MemVsFittingPage() {
       if (!windowEdited || windowStart == null || windowEnd == null) {
         setWindowStart(data.evaluation_frequency_range[0])
         setWindowEnd(data.evaluation_frequency_range[1])
-        setWindowEdited(false)
+      setWindowEdited(false)
       }
       setPhaseSelectionMode('default')
       setPhaseAngle(0)
-      if (comparisonRef.current) Plotly.purge(comparisonRef.current)
-      if (nrmseRef.current) Plotly.purge(nrmseRef.current)
-      if (intensityRef.current) Plotly.purge(intensityRef.current)
+      purgePlot(comparisonRef.current)
+      purgePlot(nrmseRef.current)
+      purgePlot(intensityRef.current)
     } catch (e: unknown) {
       setError(api.getApiErrorMessage(e))
     } finally { setTimeout(() => setLoading(false), 100) }
@@ -1196,7 +1221,7 @@ export default function MemVsFittingPage() {
         </Space>
         <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 8 }}>
           Phi display, manual input, parameter import and parameter export use this unit; backend calculation uses radians.
-          Lorentzian width keeps the original Gamma HWHM convention; Gaussian broadening is FWHM for Voigt peaks.
+          Lorentzian Gamma keeps the original HWHM convention; Gaussian broadening input uses HWHM for Voigt peaks.
         </Text>
         <Row gutter={[12, 8]}>
           <Col xs={12} md={6}>
@@ -1233,21 +1258,30 @@ export default function MemVsFittingPage() {
                   <InputNumber addonBefore="Omega" value={p.center} onChange={(v) => {
                     if (v != null) setPeaks(peaks.map((pp, ii) => ii === i ? { ...pp, center: v } : pp))
                   }} step={1} style={{ width: '100%' }} size="small" />
-                  <InputNumber addonBefore="L HWHM" value={p.width} onChange={(v) => {
+                  <InputNumber addonBefore="L Gamma (HWHM)" value={p.width} onChange={(v) => {
                     if (v != null) setPeaks(peaks.map((pp, ii) => ii === i ? { ...pp, width: v } : pp))
                   }} step={0.5} min={0.1} style={{ width: '100%' }} size="small" />
                   <InputNumber
-                    addonBefore="G FWHM"
-                    value={p.gaussian_fwhm ?? 0}
+                    addonBefore="G HWHM"
+                    value={peakGaussianHwhm(p)}
                     disabled={(p.profile_type ?? 'lorentzian') === 'lorentzian'}
                     onChange={(v) => {
-                      if (v != null) setPeaks(peaks.map((pp, ii) => ii === i ? { ...pp, gaussian_fwhm: v } : pp))
+                      if (v != null) setPeaks(peaks.map((pp, ii) => ii === i ? { ...pp, gaussian_hwhm: v } : pp))
                     }}
                     step={0.5}
                     min={0}
                     style={{ width: '100%' }}
                     size="small"
                   />
+                  {(p.profile_type ?? 'lorentzian') === 'voigt' && (
+                    <div style={{ color: '#8c8c8c', fontSize: 12, lineHeight: 1.45 }}>
+                      {peakWidthSummaryLines(p).map((line) => (
+                        <div key={line.label}>
+                          {line.label}: {line.value}{line.note ? ` (${line.note})` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <InputNumber
                     addonBefore={`Phase (${phaseUnitSymbol(phaseUnit)})`}
                     value={phaseToDisplay(p.phase, phaseUnit)}

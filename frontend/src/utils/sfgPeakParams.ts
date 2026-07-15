@@ -1,6 +1,7 @@
 import type { SfgPeakParams } from '../types/mem'
 import type { PhaseUnit } from './phaseUnit'
 import { phaseFromDisplay } from './phaseUnit'
+import { gaussianFwhmToHwhm, gaussianSigmaToHwhm } from './lineShapeWidths'
 
 export const profileTypeOptions = [
   { value: 'lorentzian', label: 'Lorentzian' },
@@ -37,7 +38,7 @@ function stringField(fields: Record<string, string>, keys: string[], fallback: s
 export function importedPeakIndices(fields: Record<string, string>): number[] {
   const indices = new Set<number>()
   for (const key of Object.keys(fields)) {
-    const match = key.match(/^(A|Omega|Gamma|Phi|Profile|Profile_Type|Gaussian_FWHM|GaussianFWHM|Lorentzian_FWHM|Label|Mode|ModeName)(\d+)$/i)
+    const match = key.match(/^(A|Omega|Gamma|Phi|Profile|Profile_Type|Gaussian_HWHM|GaussianHWHM|Gaussian_FWHM|GaussianFWHM|Gaussian_sigma|GaussianSigma|Lorentzian_FWHM|Label|Mode|ModeName)(\d+)$/i)
     if (match) indices.add(Number(match[2]))
   }
   return Array.from(indices).sort((a, b) => a - b)
@@ -56,6 +57,28 @@ export function buildImportedPeak(
     [`Gamma${suffix}`, `Lorentzian_HWHM${suffix}`, `lorentzian_hwhm_cm-1${suffix}`, `width${suffix}`],
     Number.isFinite(lorentzianFwhm) ? lorentzianFwhm / 2 : 10,
   )
+  const gaussianHwhm = numberField(
+    fields,
+    [`Gaussian_HWHM${suffix}`, `GaussianHWHM${suffix}`, `gaussian_hwhm_cm-1${suffix}`, `gaussian_hwhm${suffix}`],
+    NaN,
+  )
+  const gaussianFwhm = numberField(
+    fields,
+    [`Gaussian_FWHM${suffix}`, `GaussianFWHM${suffix}`, `gaussian_fwhm_cm-1${suffix}`, `gaussian_fwhm${suffix}`],
+    NaN,
+  )
+  const gaussianSigma = numberField(
+    fields,
+    [`Gaussian_sigma${suffix}`, `Gaussian_Sigma${suffix}`, `GaussianSigma${suffix}`, `gaussian_sigma_cm-1${suffix}`, `gaussian_sigma${suffix}`],
+    NaN,
+  )
+  const gaussianHwhmInput = Number.isFinite(gaussianHwhm)
+    ? gaussianHwhm
+    : Number.isFinite(gaussianFwhm)
+      ? gaussianFwhmToHwhm(gaussianFwhm)
+      : Number.isFinite(gaussianSigma)
+        ? gaussianSigmaToHwhm(gaussianSigma)
+        : 0
 
   return {
     label: stringField(fields, [`Label${suffix}`, `Mode${suffix}`, `ModeName${suffix}`, `mode_name${suffix}`], ''),
@@ -63,7 +86,7 @@ export function buildImportedPeak(
     amplitude: numberField(fields, [`A${suffix}`, `Amplitude${suffix}`, `amplitude${suffix}`], 1.0),
     center: numberField(fields, [`Omega${suffix}`, `Center${suffix}`, `center_cm-1${suffix}`, `center${suffix}`], defaultCenter),
     width,
-    gaussian_fwhm: numberField(fields, [`Gaussian_FWHM${suffix}`, `GaussianFWHM${suffix}`, `gaussian_fwhm_cm-1${suffix}`, `gaussian_fwhm${suffix}`], 0),
+    gaussian_hwhm: gaussianHwhmInput,
     phase: phaseFromDisplay(numberField(fields, [`Phi${suffix}`, `Phase${suffix}`, `phase${suffix}`], 0), phaseUnit),
   }
 }

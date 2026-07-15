@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { EdgePaddingOptions, MemResult, PhaseRequest, PhaseResponse, SfgGenerateRequest, SfgResult, FittingParams, MemCompareResult } from '../types/mem'
+import { peaksForBackend } from '../utils/lineShapeWidths'
 
 const api = axios.create({ baseURL: '/api' })
 
@@ -44,7 +45,10 @@ export async function applyPhase(params: PhaseRequest): Promise<PhaseResponse> {
 }
 
 export async function generateSfg(params: SfgGenerateRequest): Promise<SfgResult> {
-  const { data } = await api.post<SfgResult>('/sfg/generate', params)
+  const { data } = await api.post<SfgResult>('/sfg/generate', {
+    ...params,
+    peaks: peaksForBackend(params.peaks),
+  })
   return data
 }
 
@@ -66,7 +70,10 @@ export async function runMemCompare(
     formData.append('left_padding_width', String(edgePadding.leftWidth))
     formData.append('right_padding_width', String(edgePadding.rightWidth))
   }
-  formData.append('params_json', JSON.stringify(fitParams))
+  formData.append('params_json', JSON.stringify({
+    ...fitParams,
+    peaks: peaksForBackend(fitParams.peaks),
+  }))
   const { data } = await api.post<MemCompareResult>('/mem/compare', formData)
   return data
 }
