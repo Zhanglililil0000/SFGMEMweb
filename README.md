@@ -275,7 +275,7 @@ GUI 使用步骤：
 
 `MEM Analyzer` 和 `MEM vs Fitting` 支持可选的 `Enable edge padding / 启用两端扩展`。该功能用于减轻有限光谱窗口两端可能出现的 spectral leakage / edge artifact：进入 MEM 前，程序在原始光谱左右两端添加恒值延伸区，使 MEM 在更长的频率范围上处理。
 
-GUI 中该功能默认开启，左右 padding width 输入框默认均为 `1000 cm^-1`；会按当前输入值生效，用户可以关闭该复选框或改成任意非负宽度。
+GUI 中该功能默认关闭，左右 padding width 输入框默认均为 `1000 cm^-1`；用户需要手动开启该复选框才会按当前输入值生效，也可以改成任意非负宽度。
 
 扩展方式：
 

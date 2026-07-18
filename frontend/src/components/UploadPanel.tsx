@@ -51,7 +51,7 @@ function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
   const [originalRange, setOriginalRange] = useState<[number, number] | null>(null)
   const [memPointsEdited, setMemPointsEdited] = useState(false)
   const [fileName, setFileName] = useState<string>('')
-  const [edgePaddingEnabled, setEdgePaddingEnabled] = useState(true)
+  const [edgePaddingEnabled, setEdgePaddingEnabled] = useState(false)
   const [leftPaddingWidth, setLeftPaddingWidth] = useState<number | null>(DEFAULT_EDGE_PADDING_WIDTH)
   const [rightPaddingWidth, setRightPaddingWidth] = useState<number | null>(DEFAULT_EDGE_PADDING_WIDTH)
 
@@ -99,7 +99,7 @@ function UploadPanel({ onRun, loading, error }: UploadPanelProps) {
     setOriginalRange(null)
     setMemPoints(null)
     setMemPointsEdited(false)
-    setEdgePaddingEnabled(true)
+    setEdgePaddingEnabled(false)
     setLeftPaddingWidth(DEFAULT_EDGE_PADDING_WIDTH)
     setRightPaddingWidth(DEFAULT_EDGE_PADDING_WIDTH)
   }

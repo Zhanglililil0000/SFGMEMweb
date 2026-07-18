@@ -3,6 +3,7 @@ type PlotlyLayout = Record<string, unknown>
 type PlotlyConfig = Record<string, unknown>
 
 declare module 'plotly.js/lib/core'
+declare module 'plotly.js/lib/scatter'
 
 interface PlotlyHTMLElement extends HTMLDivElement {
   on?: (eventName: string, handler: (eventData: PlotlyClickEvent) => void) => void

@@ -55,7 +55,7 @@
 
 ### Edge padding / 两端恒值扩展
 
-- 新增 `Enable edge padding / 启用两端扩展`，可分别设置 left/right padding width，单位 `cm^-1`；GUI 复选框默认开启，左右宽度输入框默认均为 `1000 cm^-1`。
+- 新增 `Enable edge padding / 启用两端扩展`，可分别设置 left/right padding width，单位 `cm^-1`；GUI 复选框默认关闭，左右宽度输入框默认均为 `1000 cm^-1`，用户手动开启后才生效。
 - 启用后，程序先用原始左端点强度和右端点强度对光谱两端做恒值延伸，再把 `N_MEM` 个点均匀分布到 padded MEM processing range 上。
 - MEM 在 padded full range 上运行；原始光谱数组保留，不被覆盖。
 - Residual、NRMSE、默认 optimal error phase 和 selected-window NRMSE 都只在 original evaluation range 内计算，padding 区域不参与评价。
