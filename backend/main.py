@@ -18,6 +18,7 @@ from spectral_utils import (
     resample_spectrum_for_mem,
 )
 from sfg_generator import compute_sfg_spectrum
+from complex_voigt_analyzer import analyze_complex_voigt
 
 app = FastAPI(title="MEM Analyzer API")
 DEFAULT_EDGE_PADDING_WIDTH = 1000.0
@@ -49,6 +50,21 @@ class SfgGenerateRequest(BaseModel):
     nr_real: float
     nr_imag: float
     peaks: List[dict] = []
+
+
+class ComplexVoigtAnalyzeRequest(BaseModel):
+    x_min: float = 2500.0
+    x_max: float = 4000.0
+    npoints: int = 1000
+    y_min: float = -500.0
+    y_max: float = 500.0
+    grid_x: int = 181
+    grid_y: int = 161
+    nr_real: float = 0.0
+    nr_imag: float = 0.0
+    peaks: List[dict] = []
+    root_tolerance: float = 1e-7
+    max_roots: int = 12
 
 
 def collect_sfg_peak_parameters(peaks: List[dict]):
@@ -394,6 +410,16 @@ async def sfg_generate(request: SfgGenerateRequest):
         "imag_part": imag_part.tolist(),
         "sub_components": sub_components,
     }
+
+
+@app.post("/api/complex-voigt/analyze")
+async def complex_voigt_analyze(request: ComplexVoigtAnalyzeRequest):
+    try:
+        return analyze_complex_voigt(request.dict())
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Complex Voigt analysis failed: {str(e)}")
 
 
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

@@ -94,6 +94,88 @@ export interface SfgResult {
   sub_components: SfgSubComponent[]
 }
 
+export type ComplexVoigtProfileType = 'lorentzian' | 'voigt'
+
+export interface ComplexVoigtPeakParams {
+  profile_type: ComplexVoigtProfileType
+  amplitude: number
+  center: number
+  lorentzian_hwhm: number
+  gaussian_hwhm: number
+  phase_deg: number
+}
+
+export interface ComplexVoigtAnalyzeRequest {
+  x_min: number
+  x_max: number
+  npoints: number
+  y_min: number
+  y_max: number
+  grid_x: number
+  grid_y: number
+  nr_real: number
+  nr_imag: number
+  peaks: ComplexVoigtPeakParams[]
+  root_tolerance: number
+  max_roots: number
+}
+
+export interface ComplexVoigtZero {
+  x: number
+  y: number
+  real_chi: number
+  imag_chi: number
+  abs_chi: number
+  classification: string
+  source_seed_x: number
+  source_seed_y: number
+  solver_success: boolean
+  solver_message: string
+}
+
+export interface ComplexVoigtMinimum {
+  ix: number
+  iy: number
+  x: number
+  y: number
+  abs_chi: number
+  log_abs_chi: number
+}
+
+export interface ComplexVoigtResult {
+  wavenumbers: number[]
+  real_part: number[]
+  imag_part: number[]
+  intensity: number[]
+  complex_plane: {
+    x: number[]
+    y: number[]
+    abs_chi: number[][]
+    log_abs_chi: number[][]
+    minima: ComplexVoigtMinimum[]
+  }
+  zeros: ComplexVoigtZero[]
+  summary: string
+  upper_zero_count: number
+  lower_zero_count: number
+  real_axis_zero_count: number
+  metadata: {
+    gaussian_input: string
+    gaussian_conversion: string
+    lorentzian_convention: string
+    voigt_convention: string
+    pole_convention: string
+    fourier_sign_convention: string
+    root_tolerance: number
+    effective_root_tolerance: number
+    grid_point_count: number
+  }
+  normalized_peaks: Array<ComplexVoigtPeakParams & {
+    gaussian_sigma: number
+    phase_rad: number
+  }>
+}
+
 export interface FittingParams {
   nr_real: number
   nr_imag: number

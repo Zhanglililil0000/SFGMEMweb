@@ -1,251 +1,297 @@
-# DEVELOPMENT_NOTES / 项目开发交接说明
+# DEVELOPMENT_NOTES / 当前开发交接说明
 
-更新时间：2026-07-14
+更新时间：2026-08-16
 
-本文用于给后续 Codex 新对话或人工开发者快速了解当前项目状态。本文只记录开发状态与约定，不改变任何计算逻辑。
+本文用于给后续 Codex 新对话或人工开发者快速了解当前项目状态。本文只记录开发状态、约定、运行方式和待办事项；本次更新不修改任何计算逻辑。
 
 ## 1. 项目主要功能
 
-本项目是一个基于 Web 的 SFG / MEM 光谱分析工具，前端使用 React + TypeScript + Ant Design + Plotly，后端使用 FastAPI + NumPy/SciPy/Pandas。
+本项目是一个基于 Web 的 SFG / MEM 光谱分析工具。
 
-主要页面：
+技术栈：
+
+- 后端：FastAPI、NumPy、SciPy、Pandas。
+- 前端：React、TypeScript、Ant Design、Plotly、Vite。
+
+当前主要页面：
 
 | 页面 | 主要用途 |
-|------|----------|
-| MEM Analyzer | 导入强度谱 `|chi|^2`，通过 MEM 重构复谱 `Re[chi]` 和 `Im[chi]`，并可导入外部 Re/Im reference 做对照和 NRMSE |
-| SFG Generator | 根据 Lorentzian 或 Voigt peak parameters 生成 SFG intensity、Re 和 Im 光谱 |
-| MEM vs Fitting | 将 MEM 重构结果与 peak-parameter ideal spectrum 或外部 Re/Im reference 对比，进行 error phase scan 和 NRMSE 优化 |
-| Fitting Analysis | 输入 fitted peak parameters 与 ideal peak parameters，生成 fitted/ideal intensity、Re、Im；也可导入一个 reference spectrum 文件同时提供 Intensity/Re/Im 对照并计算 NRMSE |
+| --- | --- |
+| MEM Analyzer | 导入实验强度谱 `|chi|^2`，通过 MEM 重构复谱 `Re[chi]` 和 `Im[chi]`；支持 phase 调节、edge padding、外部 Re/Im reference、CSV 导出。 |
+| SFG Generator | 根据 Lorentzian / Voigt peak parameters 生成 SFG intensity、Re、Im 和子峰分量。 |
+| MEM vs Fitting | 将 MEM 重构结果与 peak-parameter ideal spectrum 或外部 Re/Im reference 对比；支持 error phase scan、NRMSE、selected spectral window NRMSE。 |
+| Fitting Analysis | 比较 fitted peak parameters 与 ideal peak parameters 生成的谱；也可导入包含 Intensity/Re/Im 的 reference spectrum 并计算 NRMSE。 |
+| Complex Voigt Response & Minimum Phase Analyzer | 生成 complex Voigt susceptibility，在实频轴显示 `Re[chi]`、`Im[chi]`、`|chi|^2`，并在复频平面扫描/搜索零点，用于数值探索 minimum-phase 条件。 |
 
-后端核心文件：
-
-| 文件 | 作用 |
-|------|------|
-| `backend/memnum.py` | MEM 核心算法，从强度谱重构复谱 |
-| `backend/spectral_utils.py` | CSV 解析、强度列处理、MEM calculation points 重采样、phase rotation |
-| `backend/spectrum_models.py` | Lorentzian 与 complex Voigt response |
-| `backend/sfg_generator.py` | SFG 总谱与子峰计算 |
-| `backend/main.py` | FastAPI API 路由 |
-
-前端核心文件：
+主要后端文件：
 
 | 文件 | 作用 |
-|------|------|
-| `frontend/src/pages/MemAnalyzerPage.tsx` | MEM Analyzer 页面 |
-| `frontend/src/pages/SfgGeneratorPage.tsx` | SFG Generator 页面 |
-| `frontend/src/pages/MemVsFittingPage.tsx` | MEM vs Fitting 页面，含 error phase scan 与 NRMSE |
-| `frontend/src/pages/FittingAnalysisPage.tsx` | Fitting Analysis 页面 |
-| `frontend/src/utils/referenceSpectrum.ts` | 外部 reference spectrum 解析、列识别、插值对齐、NRMSE 相关工具 |
-| `frontend/src/utils/phaseUnit.ts` | peak phase 单位显示、导入、导出转换 |
-| `frontend/src/utils/sfgPeakParams.ts` | peak parameter 文件导入解析 |
+| --- | --- |
+| `backend/main.py` | FastAPI API 路由入口。 |
+| `backend/memnum.py` | MEM 核心算法。 |
+| `backend/spectral_utils.py` | CSV 解析、强度列提取、MEM 网格重采样、edge padding、phase rotation。 |
+| `backend/spectrum_models.py` | Lorentzian 与 complex Voigt response 的 SFG 模型。 |
+| `backend/sfg_generator.py` | SFG 总谱和子峰分量计算。 |
+| `backend/complex_voigt_analyzer.py` | Complex Voigt analyzer 的复平面计算、Faddeeva Voigt、零点候选和 root finding。 |
+
+主要前端文件：
+
+| 文件 | 作用 |
+| --- | --- |
+| `frontend/src/App.tsx` | 顶部 tab 和页面入口。 |
+| `frontend/src/pages/MemAnalyzerPage.tsx` | MEM Analyzer 页面。 |
+| `frontend/src/pages/SfgGeneratorPage.tsx` | SFG Generator 页面。 |
+| `frontend/src/pages/MemVsFittingPage.tsx` | MEM vs Fitting 页面。 |
+| `frontend/src/pages/FittingAnalysisPage.tsx` | Fitting Analysis 页面。 |
+| `frontend/src/pages/ComplexVoigtAnalyzerPage.tsx` | Complex Voigt Response & Minimum Phase Analyzer 页面。 |
+| `frontend/src/api/mem.ts` | 前端 API 调用。 |
+| `frontend/src/types/mem.ts` | 共享 TypeScript 类型。 |
+| `frontend/src/utils/phaseUnit.ts` | peak phase 单位转换、参数文件解析基础工具。 |
+| `frontend/src/utils/sfgPeakParams.ts` | SFG peak parameter 文件导入解析。 |
+| `frontend/src/utils/referenceSpectrum.ts` | reference spectrum 解析、对齐、NRMSE 工具。 |
 
 ## 2. 已完成的修改
 
-### MEM calculation points
+### MEM 与 edge padding
 
-- 新增 `MEM calculation points / MEM 计算点数`，记为 `N_MEM`。
-- 原始点数记为 `N_original`。
-- 程序在进入 MEM 前生成独立的均匀 MEM 输入频率轴。
-- `N_MEM = N_original` 且原始网格均匀时，直接使用原始网格。
-- `N_MEM > N_original` 时，用一维插值生成更密 MEM 网格。
-- `N_MEM < N_original` 时，对强度谱重采样到更稀疏 MEM 网格。
-- 原始频率轴和原始强度谱保留，不被 MEM 输入网格覆盖。
-- GUI/API 限制 `N_MEM <= 20000`。
+- 已支持 `MEM calculation points`，即独立的 `N_MEM`。
+- 保留 `N_original`，原始实验谱不会被 MEM 输入网格覆盖。
 - `NN` 必须满足 `2 <= NN < N_MEM`。
+- 已支持 edge padding，两端用原始端点强度做恒值扩展。
+- MEM 在 padded full range 上运行；residual、NRMSE、默认 phase 选择只在 original evaluation range 内计算。
+- 导出和 API metadata 中包含 `edge_padding_enabled`、`left_padding_width`、`right_padding_width`、`padded_frequency_range`、`evaluation_frequency_range`、`n_eval`、`evaluation_indices`、`mem_regions` 等信息。
 
-### Edge padding / 两端恒值扩展
+### CSV 导入与 reference spectrum
 
-- 新增 `Enable edge padding / 启用两端扩展`，可分别设置 left/right padding width，单位 `cm^-1`；GUI 复选框默认开启，左右宽度输入框默认均为 `1000 cm^-1`。
-- 启用后，程序先用原始左端点强度和右端点强度对光谱两端做恒值延伸，再把 `N_MEM` 个点均匀分布到 padded MEM processing range 上。
-- MEM 在 padded full range 上运行；原始光谱数组保留，不被覆盖。
-- Residual、NRMSE、默认 optimal error phase 和 selected-window NRMSE 都只在 original evaluation range 内计算，padding 区域不参与评价。
-- selected window 会裁剪到 original evaluation range，不能只落在 padding 区域。
-- API/导出新增 `edge_padding_enabled`、`left_padding_width`、`right_padding_width`、`padded_frequency_range`、`evaluation_frequency_range`、`n_eval`、`evaluation_indices` 和 `mem_regions`；`mem_regions` 取值为 `left_padding`、`original`、`right_padding`。
+- MEM 强度谱 CSV 导入时，只要求 wavenumber 列和当前选择的强度列有足够数值行；其它备注列、空列或文本列不再导致整行被丢弃。
+- 支持无表头 CSV。
+- 支持 SFG Generator 导出中带逗号的 Voigt 子峰表头。
+- MEM Analyzer 支持外部 Re/Im reference。
+- MEM vs Fitting 支持外部 Re/Im reference。
+- Fitting Analysis 支持导入一个同时包含 Wavenumber、Intensity、Ideal Re、Ideal Im 的 reference spectrum。
+- reference 会先对齐到当前计算网格，再参与 residual 和 NRMSE。
 
-### 外部 Re/Im reference 导入
+### SFG Generator 与 Fitting Analysis
 
-- MEM Analyzer 支持导入外部 Re/Im reference。
-- MEM vs Fitting 支持导入外部 Re/Im reference。
-- 用户可以从 CSV/TXT 文件中选择 Wavenumber、Re、Im 列。
-- 程序会根据列名自动预选，用户可手动改选。
-- 外部 reference 会插值到 MEM 输出频率轴，用于叠图、residual 和 NRMSE。
-- 外部 reference 频率范围必须覆盖当前 MEM 网格，否则不用于 NRMSE。
-
-### NRMSE error-phase scan
-
-- MEM vs Fitting 中新增并保留 NRMSE 作为当前 GUI 推荐和默认误差指标。
-- 计算 `Re-NRMSE` 与 `Im-NRMSE`。
-- NRMSE 定义为 residual RMSE 除以对应 reference 谱分量 RMS。
-- NRMSE 是无量纲数值，越小表示 MEM 与 reference 越接近。
-- 若 reference RMS 接近 0，使用 epsilon 防止除以 0、NaN 或 Inf。
-- phase scan 默认支持 `0°` 到 `360°` 扫描。
-- 默认展示 minimum Im-NRMSE 对应的 error phase。
-- 支持 selected spectral window NRMSE，即只在用户指定波数窗口内计算局部 NRMSE。
-
-### GUI 中隐藏旧误差指标
-
-- GUI 中不再把 absolute residual sum、MAE、residual standard deviation 作为主要指标展示。
-- phase scan CSV 默认只导出 NRMSE 相关列。
-- 旧指标如仍在内部函数或历史代码中存在，不作为默认优化或 GUI 展示依据。
-
-### Peak parameters 命名统一
-
-- 面向用户的 `Fitting parameters` 已统一改为 `Peak parameters`。
-- `MEM vs Fitting` 页面名称保留，因为它表达的是 MEM 与 fitting/ideal model 的比较。
-- peak parameters 指 Lorentzian/Voigt 峰参数，可来自手动输入、文件导入或拟合结果。
-- 若特指拟合得到的参数，文档中使用 `fitted peak parameters`。
-
-### Phase unit 统一
-
-- `SFG Generator`、`MEM vs Fitting` 和 `Fitting Analysis` 使用统一 `Phase unit` 控件。
-- 可选值：
-  - `Degrees (°)`
-  - `Radians (rad)`
-- 默认值为 `Degrees (°)`。
-- GUI 中切换单位时，当前面板已有 Phi 数值会自动换算，物理相位不变。
-- 导入 peak parameter 文件时，不自动猜测单位，始终按当前 GUI 选择的 `Phase unit` 解释 Phi。
-- 导出 peak parameter 文件时，Phi 按当前 GUI 选择的 `Phase unit` 输出，并在文件注释中写明相位单位。
-
-### Lorentzian 和 Voigt 说明
-
-- Lorentzian 保持原有复响应定义：
+- SFG Generator 支持 Lorentzian 和 Voigt peak。
+- Lorentzian 宽度使用 HWHM。
+- SFG Generator 的强度定义保持：
 
 ```text
-chi_q(omega) = A_q exp(i phi_q) / (omega_q - omega - i Gamma_q)
-```
-
-- `Gamma` / `width` / `Lorentzian HWHM` 表示 Lorentzian 半高半宽 HWHM，不是 FWHM。
-- Lorentzian FWHM = `2 * Gamma`。
-- Voigt 使用 `backend/spectrum_models.py` 中的 `complex_voigt()`。
-- `complex_voigt()` 调用 `scipy.special.wofz`，即 Faddeeva function。
-- `Gaussian_FWHM` 是 Gaussian 全宽 FWHM，内部转换为 sigma：
-
-```text
-sigma = Gaussian_FWHM / (2 sqrt(2 ln 2))
-```
-
-- 程序实现的是 complex Voigt response，不是对最终强度 `|chi|^2` 做卷积。
-
-### Fitting Analysis 页面
-
-- 新增独立页面 `Fitting Analysis`。
-- 页面包含两组 peak parameters：
-  - `Fitted Peak Parameters`
-  - `Ideal Peak Parameters`
-- fitted peak parameters 中不显示 Label 输入。
-- Ideal intensity、Re、Im 可以由 `Ideal Peak Parameters` 生成。
-- 也可以导入一个 reference spectrum 文件，同时选择：
-  - Wavenumber
-  - Intensity
-  - Ideal Re
-  - Ideal Im
-- 导入 reference 后，外部 Intensity/Re/Im 优先用于对照和 NRMSE；未导入时回退到 ideal peak parameters 生成的谱。
-- 结果区显示 Re-NRMSE、Im-NRMSE、Complex NRMSE、Intensity-NRMSE。
-
-### CSV 导出
-
-- MEM Analyzer 导出保留原始谱、MEM 输入谱、MEM 输出谱。
-- MEM vs Fitting 导出包含 reference 来源、NRMSE phase scan、selected-window NRMSE 等 metadata。
-- Fitting Analysis 导出包含 fitted Re/Im/intensity、reference Re/Im/intensity、residual 和 NRMSE metadata。
-
-### CSV 导入列清洗
-
-- MEM 强度谱 CSV 导入时，只要求第一列 Wavenumber 和用户当前选择的强度列含有至少 3 行有效数值。
-- 其他无关列可以包含文本、备注或空值；这些列不会再触发整行 `dropna`，避免多列 CSV 被误删到少于 3 个有效点。
-- 无表头 CSV 会按 `header=None` 重新读取，保留第一行数据。
-- SFG Generator 的 spectrum CSV 导出会 quote 带逗号的表头；MEM 导入兼容旧版本未 quote 的 Voigt 子峰表头。
-
-### SFG intensity 数量级核查
-
-- 已系统核查 SFG Generator 的 intensity 生成链路：Lorentzian 复响应、nonresonant contribution、phase 单位、复 susceptibility `chi(omega)` 构建、`intensity = |chi|^2`、GUI 绘图、CSV 导出、MEM vs Fitting 和 Fitting Analysis 的复用路径。
-- 当前代码未发现 intensity 少一个数量级的问题。
-- 后端主定义保持：
-
-```text
-chi(omega) = chi_NR + sum_q A_q exp(i phi_q) / (omega_q - omega - i Gamma_q)
 Intensity(omega) = |chi(omega)|^2
 ```
 
-- `backend/spectrum_models.py` 中 `compute_intensity(chi)` 使用 `np.abs(chi) ** 2`，不是 `abs(chi)`。
-- SFG Generator 的 GUI 图线、绘图数据和 CSV 导出直接使用后端返回的同一组 `intensity` 数组；没有 max normalization、除以 10/100、display scaling 或额外 scale factor。
-- `MEM vs Fitting` 通过 `/api/mem/compare` 调用同一个 `compute_sfg_spectrum()` 生成 `fitting_intensity`。
-- `Fitting Analysis` 通过 `/api/sfg/generate` 分别生成 fitted 与 ideal spectrum，复用同一套 SFG 生成逻辑。
-- 已新增后端回归测试 `backend/tests/test_sfg_generator.py`，覆盖：
-  - 单峰解析值：`A=1, omega0=3000, Gamma=10, phi=0, chi_NR=0, omega=3000` 时 `Intensity=0.01`；
-  - nonresonant 情况：`chi_NR=1+0i` 时 `Intensity=1.01`；
-  - `90°` 转成 radians 与 `1.57079632679 rad` 的输出等价。
-- README 已补充说明：SFG Generator 不对 `chi(omega)` 或 `Intensity(omega)` 做归一化或显示缩放。
+- Fitting Analysis 已作为独立页面存在，可比较 fitted peak parameters、ideal peak parameters 和外部 reference。
+- Fitting Analysis 结果区显示 Re-NRMSE、Im-NRMSE、Complex NRMSE、Intensity-NRMSE。
+
+### NRMSE 与 error phase scan
+
+- MEM vs Fitting 中当前唯一 GUI 误差指标是 NRMSE。
+- 当前不再把 absolute residual sum、MAE、residual standard deviation 作为 GUI 主误差指标。
+- NRMSE 定义为 residual RMSE 除以对应 reference 谱分量 RMS。
+- 若 reference RMS 接近 0，使用 epsilon 防止除以 0、NaN 或 Inf。
+- error phase scan 默认以 degree 设置起点、终点和步长。
+- 默认展示 minimum Im-NRMSE 对应 phase。
+- 如果启用 selected spectral window NRMSE 且窗口有效，则默认展示 selected-window minimum Im-NRMSE 对应 phase；否则使用 full-range minimum Im-NRMSE。
+
+### Peak parameters 命名
+
+- 用户可见显示名中，`Fitting parameters` 已改为或应保持为 `Peak parameters`。
+- 页面标题 `MEM vs Fitting` 可以保留，因为它描述的是 MEM 与 fitting/ideal model 的比较。
+- 如果确实特指拟合得到的参数，使用 `fitted peak parameters`。
+- 内部变量名中已有的 `fitting` 可以暂时保留，避免无意义大重命名。
+
+### Phase unit 统一
+
+- SFG Generator、MEM vs Fitting、Fitting Analysis 的 peak phase GUI 默认使用 degrees。
+- 后端 peak phase 计算使用 radians。
+- peak parameter 文件导入时，不自动猜测单位；按当前 GUI phase unit 解释。
+- peak parameter 文件导出时，按当前 GUI phase unit 输出。
+- error phase GUI 使用 degrees。
+- error phase 后端和内部旋转使用 radians。
+
+### Complex Voigt Response & Minimum Phase Analyzer
+
+- 已新增独立模块和页面，不改现有 MEM/SFG 计算逻辑。
+- 后端新增 `POST /api/complex-voigt/analyze`。
+- 支持非共振背景：
+
+```text
+chi_NR = chi_NR_real + i chi_NR_imag
+```
+
+- 支持多个 oscillator，每个 oscillator 包含：
+  - profile type：Lorentzian 或 Voigt；
+  - amplitude；
+  - center frequency；
+  - Lorentzian HWHM；
+  - Gaussian HWHM；
+  - phase，GUI 中用 degree。
+- Gaussian 由 GUI 输入 HWHM，后端内部转换为 sigma：
+
+```text
+sigma = Gaussian_HWHM / sqrt(2 ln 2)
+```
+
+- Complex Voigt 使用 `scipy.special.wofz`。
+- 复响应保持与现有项目一致的符号约定：
+
+```text
+L(z) = 1 / (omega0 - z - i Gamma)
+     = -1 / (z - omega0 + i Gamma)
+```
+
+- Lorentzian pole 位于：
+
+```text
+z = omega0 - i Gamma
+```
+
+- Complex Voigt 的 Faddeeva argument 使用：
+
+```text
+(z - omega0 + i Gamma) / (sigma * sqrt(2))
+```
+
+- 页面显示：
+  - 实频轴 `Re[chi(omega)]`；
+  - 实频轴 `Im[chi(omega)]`；
+  - intensity `|chi(omega)|^2`；
+  - complex-plane heatmap；
+  - detected zeros；
+  - `Im(z)=0` 分界线；
+  - Nyquist plot。
+- 零点分类：
+  - `y > 0`：Upper half-plane zero detected；
+  - `y < 0`：Lower half-plane zero；
+  - `y = 0` 附近：Real-axis zero。
+- 页面包含 minimum phase 解释面板，明确说明这是 finite-region numerical exploration，不是全局数学证明。
+- 已加入默认示例：
+  - Single Lorentzian peak；
+  - Single Voigt peak；
+  - Two overlapping Voigt peaks with opposite phase；
+  - Water OH-like multi-peak spectrum；
+  - User-defined arbitrary peaks。
+- 已加入自定义参数导入功能，按钮为 `Import custom parameters`。
+- 自定义参数导入支持 `.txt` / `.csv`，沿用 key=value 风格，例如 `XMin`、`XMax`、`NR_Real`、`A1`、`Omega1`、`Lorentzian_HWHM1`、`Gaussian_HWHM1`、`Phi1`。
+- 导入时也兼容部分别名：
+  - `Gamma1` 作为 Lorentzian HWHM；
+  - `Gaussian_FWHM1` 自动除以 2 转成 Gaussian HWHM；
+  - `Gaussian_Sigma1` 按 `HWHM = sigma * sqrt(2 ln 2)` 转换。
+- 页面支持导出：
+  - oscillator parameters；
+  - `chi(omega)`；
+  - `Re[chi]`；
+  - `Im[chi]`；
+  - intensity；
+  - zero positions；
+  - 重要符号约定 metadata。
+
+### 测试和验证
+
+- 前端 `npm.cmd run lint` 已通过。
+- 前端 `npm.cmd run build` 已通过。
+- build 仍有 Plotly chunk size warning，这是已知打包体积问题，不是构建失败。
+- 后端曾做过 Complex Voigt smoke test，验证：
+  - Gaussian HWHM 到 sigma；
+  - Gaussian HWHM 为 0 时回到 Lorentzian；
+  - 一个解析下半平面零点可被找到。
+- 当前环境曾出现 `python -m pytest backend\tests` 无法运行，原因是当前 Python 环境没有安装 pytest。
 
 ## 3. 重要约定
 
-请后续开发务必保持以下约定，除非用户明确要求修改物理定义。
+后续开发务必保持以下约定，除非用户明确要求修改物理定义。
 
 ### Peak phase
 
-- GUI 默认使用 degrees。
-- 后端内部始终使用 radians。
-- peak parameter 文件导入时，Phi 数值按当前 GUI `Phase unit` 解释。
-- 不要根据数值大小自动判断 degrees/radians。
+- Peak phase GUI 默认使用 degrees。
+- 后端 peak phase 使用 radians。
+- 前端负责将 degree 转为 radian。
+- peak parameter 文件导入时，Phi 按当前 GUI phase unit 解释。
+- 不要根据数值大小自动猜测 degrees/radians。
 
 ### Error phase
 
-- GUI 中 error phase 输入、phase scan start/end/step 使用 degrees。
-- 后端 `/api/mem/phase` 和内部旋转使用 radians。
-- 前端负责把 degree 转换为 radian：
+- Error phase GUI 使用 degrees。
+- Error phase 后端和内部旋转使用 radians。
+- 前端负责转换：
 
 ```text
 phi_rad = phi_deg * pi / 180
 ```
 
+- `/api/mem/phase` 中的 `phase_angle` 含义保持为 radians。
+
 ### NRMSE
 
-- NRMSE 是当前 GUI 唯一主要误差指标。
+- NRMSE 是当前唯一 GUI 误差指标。
+- 中文名称：归一化均方根误差。
 - 不要在 GUI 中把 NRMSE 称为 standard deviation、STD 或 standard error。
-- 中文名称固定为：归一化均方根误差。
-- 默认展示 minimum Im-NRMSE 对应的 phase。
-- 若启用 selected spectral window NRMSE，则默认展示 selected-window minimum Im-NRMSE 对应的 phase；否则展示 full-range minimum Im-NRMSE 对应的 phase。
+- 默认展示 minimum Im-NRMSE 对应 phase。
+- selected spectral window NRMSE 只影响窗口有效时的默认展示 phase 和局部指标，不改变 MEM 计算本身。
 
-### Peak parameters 命名
+### Peak parameters
 
-- 用户可见文案中使用 `Peak parameters`。
-- 不再把普通 Lorentzian/Voigt 峰参数称为 `Fitting parameters`。
-- 内部变量或函数名如果已经存在 `fitting`，且只是内部实现，可以暂时保留，避免无意义大重命名。
+- 用户可见显示名使用 `Peak parameters`。
+- `Fitting parameters` 显示名已改为 `Peak parameters`，后续不要改回去。
+- 内部变量名不必为了文案统一而大规模重命名。
 
-### MEM 与 SFG 物理定义
+### 物理和数值定义
 
-- 不要随意修改：
-  - Lorentzian 复响应定义；
-  - non-resonant term 定义；
-  - MEM 主算法；
-  - 自相关定义；
-  - Toeplitz 线性求解；
-  - minimum-phase / MEM reconstruction 约定；
-  - error phase rotation 约定；
-  - Voigt 的 complex response 实现。
+- 不要随意修改 MEM 主算法。
+- 不要随意修改 Lorentzian 符号约定。
+- 不要随意修改 Voigt 符号约定。
+- 不要引入 arbitrary intensity scale factor。
+- SFG intensity 保持 `|chi|^2`。
+- Complex Voigt analyzer 是数值探索工具，不应在 UI 中宣称可严格证明全局 minimum phase。
 
 ## 4. 当前还需要继续处理的问题
 
-当前没有已知必须立即修复的计算逻辑阻塞，但后续仍建议关注：
+1. 如果用户打开新模块时看到 `Method Not Allowed`，优先检查是否有旧后端进程占用 8000。旧后端可能没有 `/api/complex-voigt/analyze`，导致新前端调用 API 时返回 405。
+2. Windows 上可能残留 `node.exe` 或 `python.exe` 后台进程，占用 3000、3001、8000、8001。重新运行 `run.bat` 前最好确认旧窗口和旧进程已关闭。
+3. 生产模式下后端会托管 `frontend/dist`。如果改了前端但没有重新 build，8000 上可能仍显示旧页面。
+4. Plotly 打包体积仍然很大，`npm run build` 会提示 chunk size warning。后续可考虑页面懒加载或拆分 Plotly。
+5. 前端目前主要靠 lint、build 和人工 GUI 检查，没有系统化 UI 自动测试。
+6. 后端测试文件混合了 unittest 风格和 pytest 风格。若要一次跑全量测试，推荐安装 pytest 后使用 `python -m pytest backend\tests`。
+7. 当前某些环境中 pytest 未安装，需要先在实际使用的 Python 环境安装依赖。
+8. 仓库中存在已跟踪的 `backend/__pycache__` 文件，运行 Python 后容易出现无关 `.pyc` 差异。不要把这些缓存差异误认为源码修改。
+9. Git 可能提示 `dubious ownership`。需要读状态时可临时使用 `git -c safe.directory=C:/Users/XIHUjjh/Documents/GitHub/SFGMEMweb ...`，不要未经用户同意修改全局 Git 配置。
+10. Complex Voigt zero search 是有限网格和有限初值的数值搜索，可能漏掉扫描区域外或候选点不足导致的零点。UI 文案应继续保持谨慎。
+11. 自定义参数导入已支持常用字段，但真实实验/拟合软件导出的格式可能更多，后续可按用户样例继续扩展字段别名。
+12. README 可能需要同步补充 Complex Voigt 新模块的说明和导入格式。
 
-1. GUI 视觉和布局仍可继续打磨，尤其是参数面板在小屏幕下的拥挤问题。
-2. Plotly 打包体积较大，`npm run build` 会提示 chunk size warning；这不是编译失败，但后续可考虑按页面懒加载或拆分 Plotly。
-3. 当前已有少量后端回归测试覆盖 SFG intensity 解析值；前端仍主要依赖 `npm run build`、`npm run lint` 和人工 GUI 操作，还没有系统化的前端自动测试套件。
-4. 若运行时出现 `Request failed with status code 502`，通常表示前端 dev server 无法访问后端，需要确认 `backend/main.py` 已启动且 `/api/health` 正常。
-5. Git 在某些 Windows 用户环境下可能提示 `dubious ownership`，这是 Git 安全检查，不影响程序运行；需要 Git 操作时可临时使用 `git -c safe.directory=...`，不要随意修改用户全局配置，除非用户明确同意。
-6. 外部 reference 文件导入已支持灵活列选择，但仍建议用真实实验文件做更多手动验证，确认不同表头、分隔符和列顺序都符合预期。
-7. MEM 的 `NN`、`N_MEM`、插值网格和 phase scan 结果可能对数值稳定性有影响；比较不同设置时应使用 NRMSE 和 residual，而不是只看曲线平滑程度。
-8. 如果后续再次观察到 SFG Generator intensity 与旧版本或手算结果差约一个数量级，优先检查外部参考谱、旧版本定义、输入参数单位和 amplitude/linewidth 含义差异；不要直接乘以 10，也不要引入 arbitrary scale factor。
+## 5. 运行程序的方法
 
-## 5. 运行程序和测试的方法
+### 使用 run.bat
 
-### 首次安装前端依赖
+在项目根目录双击：
 
-```bash
-cd frontend
-npm install
+```text
+run.bat
 ```
 
-### 开发模式手动启动
+选择：
+
+```text
+1
+```
+
+表示 Dev Mode，会分别启动：
+
+- 后端：`http://localhost:8000`
+- 前端：`http://localhost:3000`
+
+如果 3000 被占用，Vite 可能自动切换到 3001、3002 等端口。应以 MEM Frontend 窗口中显示的 `Local:` 地址为准。
+
+选择：
+
+```text
+2
+```
+
+表示 Prod Mode，会构建前端并由后端在 8000 托管页面。
+
+### 手动开发模式
 
 后端：
 
@@ -261,11 +307,13 @@ cd frontend
 npm run dev
 ```
 
-默认访问：
+如果 PowerShell 拦截 `npm.ps1`，使用：
 
-```text
-http://localhost:3000
+```bash
+npm.cmd run dev
 ```
+
+### 健康检查
 
 后端健康检查：
 
@@ -273,73 +321,85 @@ http://localhost:3000
 http://localhost:8000/api/health
 ```
 
-### 使用 run.bat
+正常返回：
 
-双击根目录 `run.bat`：
+```json
+{"status":"ok"}
+```
 
-- 选择 Dev Mode：分别启动后端和前端。
-- 选择 Prod Mode：先构建前端，再由后端托管静态文件。
+注意：`/api/complex-voigt/analyze` 是 POST API，不能直接在浏览器地址栏打开。直接 GET 访问 API 地址出现 405 或 404，不一定代表前端坏了。
 
-### 构建与 lint
+## 6. 测试方法
+
+### 前端 lint
 
 ```bash
 cd frontend
-npm run build
-npm run lint
-```
-
-如果在 Windows PowerShell 中遇到 `npm.ps1` 执行策略限制，可在同一目录改用：
-
-```bash
-npm.cmd run build
 npm.cmd run lint
 ```
 
-### 后端回归测试
+### 前端 build
 
-当前已有 SFG intensity 解析测试：
+```bash
+cd frontend
+npm.cmd run build
+```
+
+如果 build 成功但提示 Plotly chunk size warning，可以暂时接受。
+
+### 后端测试
+
+推荐安装 pytest 后运行：
+
+```bash
+python -m pytest backend\tests
+```
+
+如果只想运行现有 unittest 风格测试：
 
 ```bash
 python -m unittest discover -s backend\tests
 ```
 
-该测试会验证单峰解析强度、nonresonant contribution 和 peak phase radians 等价性。
+注意：`test_complex_voigt_analyzer.py` 当前是 pytest 风格函数测试，`unittest discover` 不会完整覆盖它。
 
-目前常用验证标准：
+### 手动 GUI 验证清单
 
-- `npm run build` 通过；
-- `npm run lint` 通过；
-- `python -m unittest discover -s backend\tests` 通过；
-- 手动打开四个页面；
-- MEM Analyzer 能导入强度谱并运行 MEM；
-- SFG Generator 能生成 intensity/Re/Im；
-- MEM vs Fitting 能运行 MEM & Compare、error phase scan 和 NRMSE；
-- Fitting Analysis 能用 fitted/ideal peak parameters 生成结果，也能导入一个 reference spectrum 文件选择 Intensity/Re/Im 列。
+- MEM Analyzer 可上传强度谱并运行 MEM。
+- SFG Generator 可生成 intensity/Re/Im。
+- MEM vs Fitting 可运行 MEM & Compare，并显示 NRMSE phase scan。
+- Fitting Analysis 可生成 fitted/ideal spectrum，并可导入 reference spectrum。
+- Complex Voigt Response & Minimum Phase Analyzer 可运行默认示例，显示 heatmap、Nyquist plot 和零点表。
+- Complex Voigt 页面可导入 custom parameters 文件。
+- CSV 导出文件包含必要 metadata。
 
-## 6. 后续 Codex 新对话继续开发时注意事项
+## 7. 后续 Codex 新对话继续开发时注意事项
 
-1. 修改前先阅读 `README.md` 和本文件，确认当前术语和物理约定。
-2. 如果用户要求新增功能，优先做小范围增量修改，不要重写整个项目。
-3. 不要为了整理代码而大规模重命名内部变量、函数或文件，除非用户明确要求。
-4. 不要修改 MEM、Lorentzian、Voigt、error phase、NRMSE 的物理定义，除非先明确说明原因和影响，并得到用户确认。
-5. 用户更关注 GUI 是否直观、术语是否准确、导入导出是否清楚；文案修改要同步 README。
-6. 所有用户可见的 `Fitting parameters` 应继续改为或保持为 `Peak parameters`。
-7. 相位单位相关功能必须保持：
-   - GUI 显示单位可选；
-   - 后端内部 radians；
-   - 导入导出按 GUI 当前单位；
-   - 切换单位时数值自动换算、物理相位不变。
-8. 若新增误差评估，不能替代或混淆当前默认 NRMSE；GUI 主指标仍应保持 NRMSE。
-9. 对外部 reference 做比较前，必须保证频率轴、数组长度和数组顺序严格对齐，不允许隐式截断或广播。
-10. 任何导出 CSV 的列名或 metadata 变化，都应同步 README 和本文件。
-11. SFG Generator 的 intensity 当前已确认按 `|chi|^2` 输出且无显示缩放；若后续怀疑数量级问题，先用 `backend/tests/test_sfg_generator.py` 的解析用例复核，不要直接改物理公式或乘常数。
-12. 当前工作区可能包含尚未提交的 README 和 `backend/tests/test_sfg_generator.py` 变更；继续开发前先看 `git status`，不要覆盖已有修改。
-13. 运行测试时优先使用：
+1. 开始前先阅读 `README.md` 和本文件。
+2. 开始前先看 `git status`，确认当前已有未提交修改；不要覆盖用户或前一个 Codex 留下的改动。
+3. 除非用户明确要求，优先做小范围增量修改。
+4. 不要为了整理代码而重写 MEM、SFG、Voigt 或 NRMSE 逻辑。
+5. 不要修改计算逻辑来修正文案问题；文案问题只改 UI 文案或文档。
+6. 用户明确要求“只写交接文件”时，只修改 `DEVELOPMENT_NOTES.md`。
+7. 如果要新增页面，优先新增独立文件，只在 `App.tsx`、types 和 API 层做必要接入。
+8. 用户可见术语继续保持：
+   - `Peak parameters`；
+   - `NRMSE`；
+   - `Error phase`；
+   - `Lorentzian HWHM`；
+   - Complex Voigt 页面中的 `Gaussian HWHM`。
+9. Peak phase GUI 默认 degrees，后端 radians。
+10. Error phase GUI degrees，后端 radians。
+11. 默认展示 minimum Im-NRMSE 对应 phase。
+12. NRMSE 是当前唯一 GUI 误差指标。
+13. 如果用户报告 405，先检查旧后端、旧 `dist`、端口占用和是否直接打开 POST API。
+14. 运行 Python 后若出现 `.pyc` 差异，不要把它们作为功能修改提交。
+15. 每次实际代码修改后，至少运行：
 
 ```bash
 cd frontend
-npm run build
-npm run lint
+npm.cmd run lint
+npm.cmd run build
 ```
 
-14. 如需检查后端接口，可先启动后端并访问 `/api/health`，再进行 GUI 或 API 测试。
+16. 涉及后端计算时，补充或运行后端测试；若 pytest 不可用，明确告诉用户测试未能运行的原因。

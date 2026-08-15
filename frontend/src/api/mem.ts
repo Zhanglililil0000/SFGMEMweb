@@ -1,5 +1,16 @@
 import axios from 'axios'
-import type { EdgePaddingOptions, MemResult, PhaseRequest, PhaseResponse, SfgGenerateRequest, SfgResult, FittingParams, MemCompareResult } from '../types/mem'
+import type {
+  ComplexVoigtAnalyzeRequest,
+  ComplexVoigtResult,
+  EdgePaddingOptions,
+  FittingParams,
+  MemCompareResult,
+  MemResult,
+  PhaseRequest,
+  PhaseResponse,
+  SfgGenerateRequest,
+  SfgResult,
+} from '../types/mem'
 
 const api = axios.create({ baseURL: '/api' })
 
@@ -45,6 +56,11 @@ export async function applyPhase(params: PhaseRequest): Promise<PhaseResponse> {
 
 export async function generateSfg(params: SfgGenerateRequest): Promise<SfgResult> {
   const { data } = await api.post<SfgResult>('/sfg/generate', params)
+  return data
+}
+
+export async function analyzeComplexVoigt(params: ComplexVoigtAnalyzeRequest): Promise<ComplexVoigtResult> {
+  const { data } = await api.post<ComplexVoigtResult>('/complex-voigt/analyze', params)
   return data
 }
 

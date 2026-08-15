@@ -4,6 +4,7 @@ import MemAnalyzerPage from './pages/MemAnalyzerPage'
 import MemVsFittingPage from './pages/MemVsFittingPage'
 import SfgGeneratorPage from './pages/SfgGeneratorPage'
 import FittingAnalysisPage from './pages/FittingAnalysisPage'
+import ComplexVoigtAnalyzerPage from './pages/ComplexVoigtAnalyzerPage'
 
 const { Header, Content } = Layout
 const { Text } = Typography
@@ -13,6 +14,7 @@ const tabItems = [
   { key: 'sfg', label: 'SFG Generator' },
   { key: 'fitting', label: 'MEM vs Fitting' },
   { key: 'fitting-analysis', label: 'Fitting Analysis' },
+  { key: 'complex-voigt', label: 'Complex Voigt Response & Minimum Phase Analyzer' },
 ]
 
 function App() {
@@ -62,6 +64,7 @@ function App() {
         {activeTab === 'fitting' && <MemVsFittingPage />}
         {activeTab === 'sfg' && <SfgGeneratorPage />}
         {activeTab === 'fitting-analysis' && <FittingAnalysisPage />}
+        {activeTab === 'complex-voigt' && <ComplexVoigtAnalyzerPage />}
       </Content>
     </Layout>
   )
