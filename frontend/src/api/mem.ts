@@ -4,6 +4,8 @@ import type {
   ComplexVoigtResult,
   EdgePaddingOptions,
   FittingParams,
+  LorentzianZeroFlipRequest,
+  LorentzianZeroFlipResult,
   MemCompareResult,
   MemResult,
   PhaseRequest,
@@ -20,7 +22,9 @@ export function getApiErrorMessage(e: unknown): string {
       return '后端服务未启动或不可访问。请确认 MEM Backend 窗口已正常运行，并检查 http://localhost:8000/api/health。'
     }
     if (e.response?.data?.detail) {
-      return e.response.data.detail
+      return typeof e.response.data.detail === 'string'
+        ? e.response.data.detail
+        : JSON.stringify(e.response.data.detail)
     }
     if (e.message) return e.message
   }
@@ -61,6 +65,11 @@ export async function generateSfg(params: SfgGenerateRequest): Promise<SfgResult
 
 export async function analyzeComplexVoigt(params: ComplexVoigtAnalyzeRequest): Promise<ComplexVoigtResult> {
   const { data } = await api.post<ComplexVoigtResult>('/complex-voigt/analyze', params)
+  return data
+}
+
+export async function analyzeLorentzianZeroFlip(params: LorentzianZeroFlipRequest): Promise<LorentzianZeroFlipResult> {
+  const { data } = await api.post<LorentzianZeroFlipResult>('/lorentzian-zero-flip/analyze', params)
   return data
 }
 

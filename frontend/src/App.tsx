@@ -5,6 +5,7 @@ import MemVsFittingPage from './pages/MemVsFittingPage'
 import SfgGeneratorPage from './pages/SfgGeneratorPage'
 import FittingAnalysisPage from './pages/FittingAnalysisPage'
 import ComplexVoigtAnalyzerPage from './pages/ComplexVoigtAnalyzerPage'
+import LorentzianZeroFlipPage from './pages/LorentzianZeroFlipPage'
 
 const { Header, Content } = Layout
 const { Text } = Typography
@@ -15,6 +16,7 @@ const tabItems = [
   { key: 'fitting', label: 'MEM vs Fitting' },
   { key: 'fitting-analysis', label: 'Fitting Analysis' },
   { key: 'complex-voigt', label: 'Complex Voigt Response & Minimum Phase Analyzer' },
+  { key: 'lorentzian-zero-flip', label: 'Lorentzian Zero-Flip Analyzer' },
 ]
 
 function App() {
@@ -65,6 +67,7 @@ function App() {
         {activeTab === 'sfg' && <SfgGeneratorPage />}
         {activeTab === 'fitting-analysis' && <FittingAnalysisPage />}
         {activeTab === 'complex-voigt' && <ComplexVoigtAnalyzerPage />}
+        {activeTab === 'lorentzian-zero-flip' && <LorentzianZeroFlipPage />}
       </Content>
     </Layout>
   )

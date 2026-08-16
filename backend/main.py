@@ -6,7 +6,7 @@ import numpy as np
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import os
 
 from memnum import memnum
@@ -19,6 +19,7 @@ from spectral_utils import (
 )
 from sfg_generator import compute_sfg_spectrum
 from complex_voigt_analyzer import analyze_complex_voigt
+from lorentzian_zero_flip_api import analyze_lorentzian_zero_flip
 
 app = FastAPI(title="MEM Analyzer API")
 DEFAULT_EDGE_PADDING_WIDTH = 1000.0
@@ -65,6 +66,25 @@ class ComplexVoigtAnalyzeRequest(BaseModel):
     peaks: List[dict] = []
     root_tolerance: float = 1e-7
     max_roots: int = 12
+
+
+class LorentzianZeroFlipAnalyzeRequest(BaseModel):
+    x_min: float = 2500.0
+    x_max: float = 4000.0
+    npoints: int = 2000
+    c0_real: float = 0.0
+    c0_imag: float = 0.0
+    oscillators: List[dict] = Field(default_factory=list)
+    real_zero_tolerance: float = 1e-8
+    ratio_threshold: float = 1e-12
+    near_distance_tolerance: float = 1e-7
+    pole_tolerance: float = 1e-12
+    validation_tolerance: float = 1e-9
+    flip_configurations: List[List[int]] = Field(default_factory=list)
+    enumerate_all: bool = False
+    max_flippable_for_enumeration: int = 8
+    enumeration_window_margin: float = 200.0
+    minimum_phase_effect_deg: float = 1.0
 
 
 def collect_sfg_peak_parameters(peaks: List[dict]):
@@ -420,6 +440,16 @@ async def complex_voigt_analyze(request: ComplexVoigtAnalyzeRequest):
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Complex Voigt analysis failed: {str(e)}")
+
+
+@app.post("/api/lorentzian-zero-flip/analyze")
+async def lorentzian_zero_flip_analyze(request: LorentzianZeroFlipAnalyzeRequest):
+    try:
+        return analyze_lorentzian_zero_flip(request.model_dump())
+    except (ValueError, IndexError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lorentzian zero-flip analysis failed: {str(e)}")
 
 
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

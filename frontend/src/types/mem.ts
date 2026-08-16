@@ -176,6 +176,137 @@ export interface ComplexVoigtResult {
   }>
 }
 
+export interface ComplexNumberValue {
+  real: number
+  imag: number
+}
+
+export interface LorentzianZeroFlipOscillator {
+  amplitude: number
+  phase_deg: number
+  center: number
+  lorentzian_hwhm: number
+}
+
+export interface LorentzianZeroFlipRequest {
+  x_min: number
+  x_max: number
+  npoints: number
+  c0_real: number
+  c0_imag: number
+  oscillators: LorentzianZeroFlipOscillator[]
+  real_zero_tolerance: number
+  ratio_threshold: number
+  near_distance_tolerance: number
+  pole_tolerance: number
+  validation_tolerance: number
+  flip_configurations: number[][]
+  enumerate_all: boolean
+  max_flippable_for_enumeration: number
+  enumeration_window_margin: number
+  minimum_phase_effect_deg: number
+}
+
+export interface LorentzianAlgebraicZero extends ComplexNumberValue {
+  index: number
+  id: string
+  abs_chi_direct: number
+  effectively_real: boolean
+  flippable: boolean
+  in_enumeration_window: boolean
+  phase_effect_deg: number
+  enumeration_eligible: boolean
+  enumeration_selected: boolean
+}
+
+export interface LorentzianParameterComparison {
+  oscillator_index: number
+  center: number
+  lorentzian_hwhm: number
+  original_fitted_complex_amplitude: ComplexNumberValue
+  original_amplitude: number
+  original_phase_deg: number
+  alternative_fitted_complex_amplitude: ComplexNumberValue
+  alternative_amplitude: number
+  alternative_phase_deg: number
+  amplitude_change: number
+  phase_change_deg: number
+}
+
+export interface LorentzianZeroFlipAlternative {
+  configuration_id: string
+  flipped_zero_indices: number[]
+  flipped_zeros: Array<{
+    index: number
+    id: string
+    original: ComplexNumberValue
+    reflected: ComplexNumberValue
+  }>
+  numerator_coefficients: ComplexNumberValue[]
+  denominator_coefficients: ComplexNumberValue[]
+  zeros: ComplexNumberValue[]
+  poles: ComplexNumberValue[]
+  c0: ComplexNumberValue
+  fitted_complex_amplitudes: ComplexNumberValue[]
+  amplitudes: number[]
+  phases_deg: number[]
+  comparison: LorentzianParameterComparison[]
+  real_part: number[]
+  imag_part: number[]
+  intensity: number[]
+  ratio_magnitude: Array<number | null>
+  phase_difference_rad: Array<number | null>
+  phase_difference_unwrapped_rad: Array<number | null>
+  ratio_defined: boolean[]
+  metrics: {
+    max_intensity_error: number
+    normalized_rms_intensity_error: number
+    max_ratio_magnitude_error: number
+    partial_fraction_max_abs_error: number
+    partial_fraction_normalized_rms_error: number
+  }
+  numerically_valid: boolean
+  warnings: string[]
+}
+
+export interface LorentzianZeroFlipResult {
+  convention: {
+    response: string
+    fitted_complex_amplitude: string
+    pole: string
+    conventional_residue: string
+    recovery: string
+  }
+  frequency: number[]
+  original: {
+    c0: ComplexNumberValue
+    fitted_complex_amplitudes: ComplexNumberValue[]
+    poles: ComplexNumberValue[]
+    zeros: LorentzianAlgebraicZero[]
+    numerator_coefficients: ComplexNumberValue[]
+    denominator_coefficients: ComplexNumberValue[]
+    real_part: number[]
+    imag_part: number[]
+    intensity: number[]
+    reconstruction: {
+      max_abs_complex_error: number
+      normalized_rms_complex_error: number
+    }
+  }
+  flippable_zero_count: number
+  possible_configuration_count: number
+  enumeration_flippable_zero_count: number
+  enumeration_configuration_count: number
+  enumeration_selection: {
+    max_flippable: number
+    window_margin: number
+    minimum_phase_effect_deg: number
+  }
+  alternatives: LorentzianZeroFlipAlternative[]
+  tolerances: Record<string, number>
+  warnings: string[]
+}
+
 export interface FittingParams {
   nr_real: number
   nr_imag: number
