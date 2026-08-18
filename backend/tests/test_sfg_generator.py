@@ -1,6 +1,7 @@
 import pathlib
 import sys
 import unittest
+import asyncio
 
 import numpy as np
 
@@ -8,9 +9,26 @@ BACKEND_DIR = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
 from sfg_generator import compute_sfg_spectrum
+from main import SfgGenerateRequest, sfg_generate
 
 
 class SfgGeneratorIntensityTests(unittest.TestCase):
+    def test_endpoint_generates_10000_strictly_increasing_evenly_spaced_points(self):
+        result = asyncio.run(sfg_generate(SfgGenerateRequest(
+            xmin=2700.0,
+            xmax=3800.0,
+            npoints=10000,
+            nr_real=0.0,
+            nr_imag=0.0,
+            peaks=[],
+        )))
+        grid = np.asarray(result["wavenumbers"])
+        self.assertEqual(grid.size, 10000)
+        self.assertEqual(grid[0], 2700.0)
+        self.assertEqual(grid[-1], 3800.0)
+        self.assertTrue(np.all(np.diff(grid) > 0))
+        np.testing.assert_allclose(np.diff(grid), 1100.0 / 9999.0, rtol=0, atol=1e-12)
+
     def test_single_peak_intensity_matches_analytic_abs_chi_squared(self):
         wavenumbers = np.array([3000.0])
 

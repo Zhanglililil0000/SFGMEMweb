@@ -307,6 +307,83 @@ export interface LorentzianZeroFlipResult {
   warnings: string[]
 }
 
+export interface LorentzianMultiStartPeak {
+  amplitude: number
+  phase_deg: number
+  center: number
+  hwhm: number
+  effective_phase_deg?: number
+}
+
+export interface LorentzianMultiStartParameters {
+  nr_real: number
+  nr_imag: number
+  peaks: LorentzianMultiStartPeak[]
+}
+
+export interface LorentzianMultiStartRequest {
+  x_min: number
+  x_max: number
+  npoints: number
+  reference: LorentzianMultiStartParameters
+  free: Record<string, boolean>
+  bounds: {
+    nr_real: [number, number]
+    nr_imag: [number, number]
+    peaks: Array<Record<'amplitude' | 'phase_deg' | 'center' | 'hwhm', [number, number]>>
+  }
+  perturbation: Record<string, number>
+  n_starts: number
+  random_seed: number
+  max_nfev: number
+  cluster_tolerance: number
+  acceptance_mode: 'nrmse' | 'relative-rss'
+  nrmse_threshold: number
+  relative_rss_epsilon: number
+}
+
+export interface LorentzianMultiStartSolution {
+  start_index: number
+  status: number
+  message: string
+  nfev: number
+  parameters: LorentzianMultiStartParameters
+  scaled_vector: number[]
+  parameter_distance: number
+  rss: number
+  rmse: number
+  nrmse: number
+  max_abs_intensity_deviation: number
+  complex_deviation: number
+  real_deviation: number
+  imag_deviation: number
+  intensity: number[]
+  residual: number[]
+  real_part: number[]
+  imag_part: number[]
+  accepted: boolean
+}
+
+export interface LorentzianMultiStartResult {
+  frequency: number[]
+  reference: {
+    parameters: LorentzianMultiStartParameters
+    intensity: number[]
+    real_part: number[]
+    imag_part: number[]
+  }
+  variable_labels: string[]
+  variable_scales: number[]
+  converged_count: number
+  failed_count: number
+  distinct_count: number
+  accepted_count: number
+  best_rss: number | null
+  solutions: LorentzianMultiStartSolution[]
+  accepted_solutions: LorentzianMultiStartSolution[]
+  failed_runs: Array<{ start_index: number; status: number; message: string }>
+}
+
 export interface FittingParams {
   nr_real: number
   nr_imag: number

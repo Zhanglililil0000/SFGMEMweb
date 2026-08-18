@@ -20,6 +20,7 @@ from spectral_utils import (
 from sfg_generator import compute_sfg_spectrum
 from complex_voigt_analyzer import analyze_complex_voigt
 from lorentzian_zero_flip_api import analyze_lorentzian_zero_flip
+from lorentzian_multistart import run_multistart_refit
 
 app = FastAPI(title="MEM Analyzer API")
 DEFAULT_EDGE_PADDING_WIDTH = 1000.0
@@ -85,6 +86,23 @@ class LorentzianZeroFlipAnalyzeRequest(BaseModel):
     max_flippable_for_enumeration: int = 8
     enumeration_window_margin: float = 200.0
     minimum_phase_effect_deg: float = 1.0
+
+
+class LorentzianMultiStartRequest(BaseModel):
+    x_min: float
+    x_max: float
+    npoints: int = 1000
+    reference: dict
+    free: dict
+    bounds: dict
+    perturbation: dict = Field(default_factory=dict)
+    n_starts: int = 20
+    random_seed: int = 12345
+    max_nfev: int = 3000
+    cluster_tolerance: float = 1e-3
+    acceptance_mode: str = "nrmse"
+    nrmse_threshold: float = 1e-6
+    relative_rss_epsilon: float = 0.05
 
 
 def collect_sfg_peak_parameters(peaks: List[dict]):
@@ -450,6 +468,16 @@ async def lorentzian_zero_flip_analyze(request: LorentzianZeroFlipAnalyzeRequest
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lorentzian zero-flip analysis failed: {str(e)}")
+
+
+@app.post("/api/lorentzian-multistart/search")
+async def lorentzian_multistart_search(request: LorentzianMultiStartRequest):
+    try:
+        return run_multistart_refit(request.model_dump())
+    except (ValueError, KeyError, IndexError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lorentzian multi-start search failed: {str(e)}")
 
 
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

@@ -33,8 +33,12 @@ function emptyPeak(): SfgPeakParams {
 }
 
 function csvCell(value: number | string): string {
-  const text = typeof value === 'number' ? value.toExponential(6) : value
+  const text = typeof value === 'number' ? value.toPrecision(6) : value
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+function formatWavenumber(value: number): string {
+  return value.toPrecision(6)
 }
 
 export default function SfgGeneratorPage() {
@@ -129,7 +133,10 @@ export default function SfgGeneratorPage() {
         const ci = (v: number[] | number) => (Array.isArray(v) ? v[i] : v)
         return [ci(c.intensity), ci(c.real), ci(c.imag)]
       })))
-    const csv = [header.map(csvCell).join(','), ...rows.map((r) => r.map(csvCell).join(','))].join('\n')
+    const csv = [
+      header.map(csvCell).join(','),
+      ...rows.map((row) => [formatWavenumber(Number(row[0])), ...row.slice(1).map(csvCell)].join(',')),
+    ].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url; a.download = 'SFG_spectrum.csv'
@@ -302,6 +309,7 @@ export default function SfgGeneratorPage() {
         </Card>
       </Col>
       <Col xs={24} lg={17}>
+        {result && <Alert type="info" showIcon style={{ marginBottom: 8 }} message={`Generated grid: ${result.wavenumbers.length} points, ${formatWavenumber(result.wavenumbers[0])} to ${formatWavenumber(result.wavenumbers[result.wavenumbers.length - 1])} cm⁻¹, spacing ${formatWavenumber(result.wavenumbers[1] - result.wavenumbers[0])} cm⁻¹`} />}
         <div ref={intensityRef} style={{ width: '100%', height: '30vh', minHeight: 250, background: '#fff', borderRadius: 8, marginBottom: 8 }} />
         <div ref={realRef} style={{ width: '100%', height: '30vh', minHeight: 250, background: '#fff', borderRadius: 8, marginBottom: 8 }} />
         <div ref={imagRef} style={{ width: '100%', height: '30vh', minHeight: 250, background: '#fff', borderRadius: 8 }} />

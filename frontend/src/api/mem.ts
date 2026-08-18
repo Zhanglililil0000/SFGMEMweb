@@ -6,6 +6,8 @@ import type {
   FittingParams,
   LorentzianZeroFlipRequest,
   LorentzianZeroFlipResult,
+  LorentzianMultiStartRequest,
+  LorentzianMultiStartResult,
   MemCompareResult,
   MemResult,
   PhaseRequest,
@@ -70,6 +72,11 @@ export async function analyzeComplexVoigt(params: ComplexVoigtAnalyzeRequest): P
 
 export async function analyzeLorentzianZeroFlip(params: LorentzianZeroFlipRequest): Promise<LorentzianZeroFlipResult> {
   const { data } = await api.post<LorentzianZeroFlipResult>('/lorentzian-zero-flip/analyze', params)
+  return data
+}
+
+export async function searchLorentzianMultiStart(params: LorentzianMultiStartRequest): Promise<LorentzianMultiStartResult> {
+  const { data } = await api.post<LorentzianMultiStartResult>('/lorentzian-multistart/search', params)
   return data
 }
 
