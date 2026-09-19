@@ -1,6 +1,6 @@
 # DEVELOPMENT_NOTES / 当前开发交接说明
 
-更新时间：2026-08-16
+更新时间：2026-09-20
 
 本文用于给后续 Codex 新对话或人工开发者快速了解当前项目状态。本文只记录开发状态、约定、运行方式和待办事项；本次更新不修改任何计算逻辑。
 
@@ -22,6 +22,8 @@
 | MEM vs Fitting | 将 MEM 重构结果与 peak-parameter ideal spectrum 或外部 Re/Im reference 对比；支持 error phase scan、NRMSE、selected spectral window NRMSE。 |
 | Fitting Analysis | 比较 fitted peak parameters 与 ideal peak parameters 生成的谱；也可导入包含 Intensity/Re/Im 的 reference spectrum 并计算 NRMSE。 |
 | Complex Voigt Response & Minimum Phase Analyzer | 生成 complex Voigt susceptibility，在实频轴显示 `Re[chi]`、`Im[chi]`、`|chi|^2`，并在复频平面扫描/搜索零点，用于数值探索 minimum-phase 条件。 |
+| Lorentzian Zero-Flip Analyzer | 对用户提供的纯 Lorentzian 拟合参数构造精确有理表示，寻找分子零点，生成 zero-flipped alternatives，恢复候选 Lorentzian 参数，并在候选生成后提供独立的物理初筛。 |
+| Lorentzian Multi-Start Refitting | 从纯 Lorentzian reference 参数生成强度，并进行受约束的多起点 intensity-only least-squares 搜索，用于寻找不同参数局部解。 |
 
 主要后端文件：
 
@@ -33,6 +35,9 @@
 | `backend/spectrum_models.py` | Lorentzian 与 complex Voigt response 的 SFG 模型。 |
 | `backend/sfg_generator.py` | SFG 总谱和子峰分量计算。 |
 | `backend/complex_voigt_analyzer.py` | Complex Voigt analyzer 的复平面计算、Faddeeva Voigt、零点候选和 root finding。 |
+| `backend/lorentzian_zero_flip.py` | 纯 Lorentzian 有理模型、零点翻转、部分分式恢复和数值诊断核心。 |
+| `backend/lorentzian_zero_flip_api.py` | Lorentzian zero-flip 请求校验、候选枚举、排序和 JSON 序列化。 |
+| `backend/lorentzian_multistart.py` | Lorentzian multi-start bounded least-squares、聚类、接受规则和结果指标。 |
 
 主要前端文件：
 
@@ -44,6 +49,8 @@
 | `frontend/src/pages/MemVsFittingPage.tsx` | MEM vs Fitting 页面。 |
 | `frontend/src/pages/FittingAnalysisPage.tsx` | Fitting Analysis 页面。 |
 | `frontend/src/pages/ComplexVoigtAnalyzerPage.tsx` | Complex Voigt Response & Minimum Phase Analyzer 页面。 |
+| `frontend/src/pages/LorentzianZeroFlipPage.tsx` | 纯 Lorentzian zero-flip、候选对比、物理初筛和导出页面。 |
+| `frontend/src/pages/LorentzianMultiStartPage.tsx` | Lorentzian multi-start 参数约束、搜索结果、图表和导出页面。 |
 | `frontend/src/api/mem.ts` | 前端 API 调用。 |
 | `frontend/src/types/mem.ts` | 共享 TypeScript 类型。 |
 | `frontend/src/utils/phaseUnit.ts` | peak phase 单位转换、参数文件解析基础工具。 |
@@ -187,6 +194,54 @@ z = omega0 - i Gamma
   - zero positions；
   - 重要符号约定 metadata。
 
+### Lorentzian Zero-Flip Analyzer
+
+- 已新增独立纯 Python 数值核心、FastAPI 编排层和 React 页面，不复用 Complex Voigt 的复平面数值搜索。
+- 后端新增 `POST /api/lorentzian-zero-flip/analyze`。
+- 模块只接受 finite pure-Lorentzian fitting model，不支持 Voigt/Faddeeva zero flip，也不做 Voigt-to-Lorentzian 转换。
+- 必须保持以下符号约定：
+
+```text
+chi(z) = C0 + sum_q D_q / (p_q - z)
+D_q = A_q exp(i phi_q)
+p_q = omega_q - i Gamma_q
+chi(z) = P(z) / Q(z)
+R_q = P(p_q) / Q'(p_q) = -D_q
+D_q = -P(p_q) / Q'(p_q)
+```
+
+- 用户参数表和导出中的主复数参数是 fitted complex amplitude `D_q`，不要把传统数学留数 `R_q` 当作 `D_q`，否则会产生 180° 相位约定错误。
+- exact zero flip 只将选中分子零点变为其共轭，保持分母 `Q(z)`、pole、`omega_q` 和 `Gamma_q` 不变。
+- 页面显示原始 `P/Q`、poles、zeros、候选 `P/Q`、复谱、强度、相位差、参数比较和数值诊断。
+- 数值验证包含 intensity mismatch、intensity NRMSE、`max ||B|-1|`、partial-fraction maximum error 和 normalized RMS error。`numerically_valid` 当前由 partial-fraction normalized RMS error 是否不超过 `validation_tolerance` 决定，默认容差为 `1e-9`。
+- 高阶模型可能出现很大的 polynomial coefficient dynamic range。warning 只是数值风险提示，不应自动视为物理不允许。
+- 自动枚举会按分析频率窗口、window margin 和 phase effect 对零点筛选/排序，最多选 8 个零点，因此自动生成最多 255 个非空组合。单次 API 最多返回 256 个显式 configuration。
+- 页面也允许用户手动勾选可翻转的非实零点生成指定组合。
+- 参数文件导入使用 degree 相位；负振幅会转换为 `abs(A)` 并给相位增加 180°，以保持 `D_q` 不变。
+- `Profile` 存在时必须等于大小写不敏感的 `lorentzian`。常见误拼 `Lorenzian` 会被当成非 Lorentzian；任何非零 Gaussian width 也会被拒绝。
+
+#### Post-generation physical pre-screening
+
+- 物理初筛只在候选生成后运行，不进入原始拟合参数、零点求解或 zero-flip 构造过程。
+- 初筛不会删除候选，也不会改变 `numerically_valid`；numerical validation 与 physical screening 必须继续分开显示。
+- `Pure Water Interface`：检查全部候选峰是否在 `0°` 或 `180°` 的可调容差内。
+- `Charged Interface`：只检查 center 落在用户指定区间内的峰；默认区间 `2700–3000 cm^-1`。区间内无峰时返回 `not-screened`。
+- `Custom Phase Rules`：可选全部峰或指定 oscillator，可检查接近 `0°/180°`，也可检查 circular phase range；相位区间支持跨越 `-180°/180°`。
+- 多条自定义规则按 AND 逻辑解释。候选表显示 pass/fail/not-screened、检查峰数和失败详情，并支持只看 physical pass、physical fail、numerical + physical pass。
+- `Export all summaries` 会写入筛选模式、规则说明、每个候选的筛选状态、检查峰数和失败详情。
+
+### Lorentzian Multi-Start Refitting
+
+- 后端新增 `POST /api/lorentzian-multistart/search`，核心位于 `backend/lorentzian_multistart.py`。
+- 此模块从 reference Lorentzian 参数生成 `|chi|^2`，再用 `scipy.optimize.least_squares` 做 independent bounded intensity-only fits；它不使用 zero-flip 解，也不进行物理 admissibility 分类。
+- 支持自由/固定 `nr_real`、`nr_imag`、`amplitude`、`phase_deg`、`center`、`hwhm` 参数类型，并为 NR 和每个峰参数设置独立 bounds。
+- `n_starts` 范围为 1–500；start 0 是 reference，后续起点由 `random_seed` 和 scaled-coordinate perturbation 生成。
+- 收敛解以 scaled vector 的 RMS distance 和 `cluster_tolerance` 去重。
+- 接受模式为 intensity NRMSE threshold，或 `RSS <= best RSS * (1 + epsilon)`；前端可对已有结果交互修改阈值而不重新拟合。
+- 输出/页面包含 intensity RSS、RMSE、NRMSE、maximum absolute intensity deviation、parameter distance，以及 complex/Re/Im deviation。这些复谱指标是对 intensity-only 拟合结果的诊断，不是优化目标。
+- 参数导入只接受纯 Lorentzian 和 degree 相位。signed amplitude 原样保留；输出同时提供 wrapped `phase_deg` 与考虑负振幅等价性的 `effective_phase_deg`。
+- 页面显示 intensity overlay、intensity residual、Re/Im response 和 accepted scaled-parameter distributions，并导出当前前端筛选后接受的参数。
+
 ### 测试和验证
 
 - 前端 `npm.cmd run lint` 已通过。
@@ -197,6 +252,9 @@ z = omega0 - i Gamma
   - Gaussian HWHM 为 0 时回到 Lorentzian；
   - 一个解析下半平面零点可被找到。
 - 当前环境曾出现 `python -m pytest backend\tests` 无法运行，原因是当前 Python 环境没有安装 pytest。
+- Lorentzian zero-flip 后端包含 `test_lorentzian_zero_flip.py` 和 `test_lorentzian_zero_flip_api.py`；2026-09-20 从 `backend` 目录运行 `python -m unittest discover -s tests`，共运行 41 项并全部通过。
+- Lorentzian Zero-Flip 页面已通过 lint、production build 和本地 GUI 回归；纯水与带电界面初筛均确认在候选生成后生效，浏览器控制台无 error/warning。
+- Lorentzian multi-start 后端测试位于 `backend/tests/test_lorentzian_multistart.py`。
 
 ## 3. 重要约定
 
@@ -244,6 +302,11 @@ phi_rad = phi_deg * pi / 180
 - 不要引入 arbitrary intensity scale factor。
 - SFG intensity 保持 `|chi|^2`。
 - Complex Voigt analyzer 是数值探索工具，不应在 UI 中宣称可严格证明全局 minimum phase。
+- Lorentzian zero-flip analyzer 是独立的数学分析工具，不应在 zero-flip 核心中加入 C–H/O–H 分类或 phase-anchor 物理判定。
+- Lorentzian zero-flip 的主复参数保持为 `D_q = A_q exp(i phi_q)`；传统数学留数只能明确标记为 `R_q = -D_q`。
+- exact zero flip 必须保持原分母和 pole set，不要重新拟合或移动 `omega_q`、`Gamma_q`。
+- physical pre-screening 必须保持为 post-generation、可配置且非破坏性的显示/过滤层，不能取代 numerical validation。
+- Lorentzian multi-start 是 intensity-only 数学搜索；不要把接受阈值描述为物理 admissibility，也不要暗示复谱 deviation 是拟合目标。
 
 ## 4. 当前还需要继续处理的问题
 
@@ -258,7 +321,6 @@ phi_rad = phi_deg * pi / 180
 9. Git 可能提示 `dubious ownership`。需要读状态时可临时使用 `git -c safe.directory=C:/Users/XIHUjjh/Documents/GitHub/SFGMEMweb ...`，不要未经用户同意修改全局 Git 配置。
 10. Complex Voigt zero search 是有限网格和有限初值的数值搜索，可能漏掉扫描区域外或候选点不足导致的零点。UI 文案应继续保持谨慎。
 11. 自定义参数导入已支持常用字段，但真实实验/拟合软件导出的格式可能更多，后续可按用户样例继续扩展字段别名。
-12. README 可能需要同步补充 Complex Voigt 新模块的说明和导入格式。
 
 ## 5. 运行程序的方法
 
@@ -371,6 +433,10 @@ python -m unittest discover -s backend\tests
 - Fitting Analysis 可生成 fitted/ideal spectrum，并可导入 reference spectrum。
 - Complex Voigt Response & Minimum Phase Analyzer 可运行默认示例，显示 heatmap、Nyquist plot 和零点表。
 - Complex Voigt 页面可导入 custom parameters 文件。
+- Lorentzian Zero-Flip Analyzer 可导入纯 Lorentzian 参数、构造 `P/Q`、显示 poles/zeros，并生成选中或自动枚举的 alternatives。
+- Lorentzian Zero-Flip Analyzer 的参数比较表以 `D_q` 为主，并确认候选的 center/HWHM 与原始 pole set 一致。
+- zero-flip 候选区可分别显示 numerical validation 和 post-generation physical pre-screening；验证 Pure Water、Charged Interface 和 Custom Phase Rules 不改变候选集合。
+- Lorentzian Multi-Start Refitting 可导入纯 Lorentzian 参数、运行 bounded multi-start search、调整接受阈值、查看 distinct solutions 和导出当前 accepted parameters。
 - CSV 导出文件包含必要 metadata。
 
 ## 7. 后续 Codex 新对话继续开发时注意事项

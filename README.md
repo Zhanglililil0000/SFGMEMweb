@@ -1,6 +1,6 @@
 # MEM Analyzer Web
 
-基于最大熵法（MEM）的 Web 端和频光谱（SFG）分析平台。提供四个主要功能模块：MEM 光谱重建、SFG 光谱生成器、MEM 与拟合结果对比、Fitting Analysis。
+基于最大熵法（MEM）的 Web 端和频光谱（SFG）分析平台。主要功能包括 MEM 光谱重建、SFG 光谱生成、MEM 与拟合结果对比、Fitting Analysis、Complex Voigt 数值零点搜索、纯 Lorentzian 模型的精确 zero-flip 分析，以及受约束的 Lorentzian multi-start 强度重拟合。
 
 ## 项目架构
 
@@ -10,6 +10,9 @@ MEMweb/
 │   ├── main.py                       # FastAPI 应用入口，所有 API 路由
 │   ├── memnum.py                     # MEM 核心算法（从 MEMPy 移植）
 │   ├── sfg_generator.py              # Lorentzian SFG 光谱计算
+│   ├── lorentzian_zero_flip.py        # 纯 Lorentzian 有理表示与精确 zero flip 数值核心
+│   ├── lorentzian_zero_flip_api.py    # zero-flip API 编排与序列化
+│   ├── lorentzian_multistart.py        # 受约束的 Lorentzian multi-start 强度重拟合
 │   ├── spectral_utils.py             # CSV 解析、相位旋转、数据导出
 │   └── requirements.txt
 │
@@ -23,7 +26,10 @@ MEMweb/
 │   │   │   ├── MemAnalyzerPage.tsx   # 标签 1：MEM 光谱分析器
 │   │   │   ├── SfgGeneratorPage.tsx  # 标签 2：SFG 光谱生成器
 │   │   │   ├── MemVsFittingPage.tsx  # 标签 3：MEM vs Fitting 对比
-│   │   │   └── FittingAnalysisPage.tsx # 标签 4：Fitting Analysis
+│   │   │   ├── FittingAnalysisPage.tsx # 标签 4：Fitting Analysis
+│   │   │   ├── ComplexVoigtAnalyzerPage.tsx # Complex Voigt 数值零点搜索
+│   │   │   ├── LorentzianZeroFlipPage.tsx # 纯 Lorentzian zero-flip 分析
+│   │   │   └── LorentzianMultiStartPage.tsx # Lorentzian multi-start 重拟合
 │   │   ├── components/
 │   │   │   ├── UploadPanel.tsx       # MEM 文件上传 & 参数设置
 │   │   │   ├── IntensityChart.tsx    # 强度谱图（Plotly.js）
@@ -224,6 +230,85 @@ NRMSE_intensity = RMSE(Intensity_fitted - Intensity_reference) / RMS(Intensity_r
 ```
 
 NRMSE 是无量纲数值，越小表示 fitted spectrum 越接近当前 reference。不要将 NRMSE 称为 standard deviation。若 reference Re、reference Im、reference complex 或 reference intensity 的 RMS 接近 0，程序会使用 epsilon 保护，避免除以零、NaN 或 Inf。
+
+### Lorentzian Zero-Flip Analyzer
+
+该页面是纯数学分析工具，用于从一组已经拟合完成的**纯 Lorentzian**参数构造精确有理表示、寻找分子零点、生成 zero-flipped alternatives，并恢复每个候选解的 Lorentzian 参数。它不会按 C–H/O–H 类型解释峰，也不会在候选生成前施加物理约束；Voigt/Faddeeva 响应不属于此模块。
+
+本模块始终使用以下符号约定：
+
+```text
+chi(z) = C0 + sum_q D_q / (p_q - z)
+D_q = A_q exp(i phi_q)
+p_q = omega_q - i Gamma_q
+chi(z) = P(z) / Q(z)
+```
+
+由于 `p_q - z = -(z - p_q)`，传统数学留数为：
+
+```text
+R_q = P(p_q) / Q'(p_q) = -D_q
+```
+
+因此程序恢复并在参数比较表中优先报告的拟合复振幅是：
+
+```text
+D_q = -P(p_q) / Q'(p_q)
+A_q = |D_q|
+phi_q = arg(D_q)    # GUI 中以 degree 报告
+```
+
+对选中的分子零点执行 `z_k -> conjugate(z_k)` 时，分母 `Q(z)` 和极点集合保持不变，所以精确 zero flip 后的 `omega_q` 与 `Gamma_q` 也应保持不变，仅允许数值舍入误差。页面提供：
+
+- 原始 `P(z)`、`Q(z)` 系数、极点和分子零点；
+- 单独选择零点或枚举非空 zero-flip 组合；
+- 原始谱与候选复谱、强度、相位差和 pole-zero 图；
+- 每个振子的原始/候选 `D_q`、振幅、相位、振幅变化和相位变化；
+- 强度一致性、`|B|-1`、部分分式重构误差和 coefficient dynamic range 等数值诊断；
+- 单个候选参数、谱数据和全部候选摘要导出。
+
+候选解的 `Numerically valid` 状态表示恢复出的部分分式在配置容差内重构了 zero-flipped 有理函数。它与后续物理初筛是两个独立结果，不代表候选一定具有合理的物理解释。
+
+#### 候选生成后的物理初筛
+
+物理初筛只作用于已经生成的候选参数，不修改原始拟合参数、零点、翻零组合、极点或数值验证结果。所有候选仍保留并可查看或导出。目前支持：
+
+- `Pure Water Interface`：所有候选峰的相位都必须位于 `0°` 或 `180°` 的可调容差内；
+- `Charged Interface`：只检查指定中心频率区间内的峰，默认区间为 `2700–3000 cm^-1`，相位要求同样为接近 `0°` 或 `180°`；
+- `Custom Phase Rules`：可针对全部峰或指定振子，设置接近 `0°/180°` 的容差，或设置支持跨越 `-180°/180°` 边界的圆周相位区间。
+
+如果指定频率区间内没有峰，状态显示为 `not-screened`。多条自定义规则按 AND 逻辑使用：候选必须通过全部适用规则才显示为物理初筛通过。候选表可按物理通过、物理失败或“数值与物理均通过”过滤；筛选状态和失败详情也会写入全部候选摘要。
+
+#### 参数文件导入注意事项
+
+参数文件使用 `key=value` 格式，支持 `NR_Real`、`NR_Imag`、`A{n}`、`Omega{n}`、`Gamma{n}`、`Phi{n}` 和可选的 `Profile{n}`。本页面固定按 degree 解释 `Phi`。注释行 `# Phase unit: degrees` 仅作说明；如果提供可解析字段 `Phase_Unit=...` 或 `PhaseUnit=...`，其值必须为 degrees。
+
+`Profile{n}` 若存在，必须正确写为 `Lorentzian`（大小写不敏感）。例如 `Lorenzian` 少了字母 `t`，不会被识别为纯 Lorentzian，并会触发拒绝 Voigt/Gaussian broadening 的提示。任何非零 `Gaussian_HWHM`、`Gaussian_FWHM` 或 `Gaussian_Sigma` 也会被拒绝。
+
+为保持 `A >= 0` 的统一表示，负振幅会自动做等价转换：
+
+```text
+A < 0, phi  ->  |A|, wrap(phi + 180 deg)
+```
+
+这不会改变输入对应的拟合复振幅 `D_q`。
+
+当峰数较多时，多项式系数可能跨越很大的动态范围，零点和部分分式恢复会对浮点误差敏感。页面会显示相关 warning；物理初筛不能替代这些数值诊断。自动枚举最多选取 8 个符合频率窗口和最小相位影响条件的零点，即每次最多生成 `2^8 - 1 = 255` 个非空组合；仍可手动选择页面列出的可翻零点生成特定组合。
+
+### Lorentzian Multi-Start Refitting
+
+该页面从用户提供的纯 Lorentzian 参数生成 reference intensity，然后使用 SciPy bounded `least_squares` 从多个起点重复拟合相同的强度 `|chi|^2`，用于搜索强度相近但参数不同的局部解。它是独立的数学搜索工具，不使用 zero-flip 候选，也不判断物理可接受性。
+
+- 可选择放开或固定 NR real、NR imag、amplitude、phase、center 和 HWHM 参数类型；
+- 每个非共振参数和每个峰参数都具有独立上下界，free HWHM 的下界必须大于 0；
+- 可设置 starts（1–500）、random seed、maximum evaluations、cluster tolerance，以及各参数在 scaled coordinates 中的随机扰动标准差；
+- 第一个起点始终为 reference 参数，其余起点由固定 seed 的随机扰动产生；
+- 收敛结果按 scaled parameter RMS distance 聚类，避免重复显示同一个参数解；
+- 可按 intensity NRMSE 阈值，或按 `RSS <= best RSS * (1 + epsilon)` 接受候选；界面上的 NRMSE 阈值可在拟合后交互调整，不会重新运行优化；
+- 显示收敛、失败、distinct、accepted 数量，以及 intensity、residual、Re/Im 和 scaled parameter distribution；
+- 可导出当前接受的参数及 RSS、RMSE、NRMSE、强度最大偏差和复谱差异指标。
+
+导入格式与 zero-flip 页面类似，只接受纯 Lorentzian 和 degree 相位。与 zero-flip 页面不同，multi-start 页面会原样保留 signed amplitude，并额外报告 `effective_phase_deg` 处理负振幅与相位的等价表示。
 
 ## MEM Calculation Points / MEM 计算点数
 
